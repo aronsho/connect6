@@ -15,8 +15,8 @@ class E6:
         self.turn = 0 # turn of game
         self.timeleft = 0 # time that passed
         self.eval_pri = (10,10) # moves that are evaluated at each tree-level
-        self.eval_pos = 4
-        self.level = 1   # number of tree-levels
+        self.eval_pos = 6
+        self.level = 2   # number of tree-levels
         # coefficients for evaluation
         self.me_pri_1 = np.array([2, 6, 0, 1000]).reshape(4,1,1)
         self.op_pri_1 = np.array([1, 4, 10, 100]).reshape(4,1,1)
