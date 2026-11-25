@@ -22,10 +22,20 @@ const onlineInfo = document.getElementById("online-info");
 const onlineStatusEl = document.getElementById("online-status");
 const shareRow = document.getElementById("share-row");
 const shareInput = document.getElementById("share-link");
+const scoreEl = document.getElementById("score");
+const offerRow = document.getElementById("offer-row");
+const offerText = document.getElementById("offer-text");
+const acceptBtn = document.getElementById("accept");
+const declineBtn = document.getElementById("decline");
+const resignBtn = document.getElementById("resign");
+const boardWrap = document.getElementById("board-wrap");
+const zoomBtn = document.getElementById("zoom");
 
 let g;          // game state
 let gen = 0;    // bumps on new game / undo to cancel pending bot moves
-let hover = -1;
+let hover = -1;   // mouse hover cell (desktop)
+let preview = -1; // tapped-but-not-yet-placed cell (touch screens)
+let zoomed = false;
 
 function onlinePlayers() {
   return Online.myColor === 0 ? ["human", "remote"] : ["remote", "human"];
@@ -41,8 +51,10 @@ function newGame() {
     history: [],         // completed turns: {player, cells}
     winner: null,        // 0, 1, "draw" or null
     winLine: null,
+    resigned: null,      // colour that resigned, if any
     thinking: false,
   };
+  Online.offer = null;
   startTurn();
 }
 
@@ -52,6 +64,7 @@ function stonesThisTurn() {
 
 function startTurn() {
   g.placed = [];
+  preview = -1;
   render();
   if (g.winner === null && g.players[g.current].startsWith("bot")) scheduleBot();
 }
@@ -92,7 +105,10 @@ function endTurn(line) {
     g.winner = "draw";
   } else {
     g.current = 1 - g.current;
+    startTurn();
+    return;
   }
+  recordResult();
   startTurn();
 }
 
@@ -121,30 +137,76 @@ function serializeState() {
   return {
     boards: g.boards.map(b => Array.from(b)),
     current: g.current, placed: g.placed, history: g.history,
-    winner: g.winner, winLine: g.winLine && Array.from(g.winLine),
+    winner: g.winner, winLine: g.winLine && Array.from(g.winLine), resigned: g.resigned,
   };
 }
 
-Online.onStart = (myColor, state) => {
+Online.onStart = (myColor, state, score) => {
   newGame();
   if (state) {
     Object.assign(g, state, { boards: state.boards.map(b => Uint8Array.from(b)) });
     render();
   }
+  if (score) Online.score = score;
   updateOnlineUI();
 };
+
+// Count a finished online game in the session score (by person, not colour,
+// because colours swap every game).
+function recordResult() {
+  if (!Online.active) return;
+  if (g.winner === "draw") Online.score.draws++;
+  else {
+    const winnerRole = g.winner === Online.myColor ? Online.role : (Online.role === "host" ? "guest" : "host");
+    Online.score[winnerRole]++;
+  }
+  updateOnlineUI();
+}
+
+function resign(loser) {
+  if (g.winner !== null) return;
+  gen++;
+  g.winner = 1 - loser;
+  g.resigned = loser;
+  g.thinking = false;
+  recordResult();
+  render();
+}
+
+function onResignClick() {
+  if (!Online.connected || g.winner !== null) return;
+  if (!confirm("Resign this game? Your friend gets the win.")) return;
+  Online.send({ t: "resign" });
+  resign(Online.myColor);
+}
+
+function startAgreedNewGame() {
+  // Swap colours each new game so both players get to open.
+  const hostColor = Online.role === "host" ? 1 - Online.myColor : Online.myColor;
+  Online.send({ t: "new", hostColor });
+  Online.onMessage({ t: "new", hostColor });
+}
 
 Online.onMessage = msg => {
   const remoteTurn = g.winner === null && g.players[g.current] === "remote";
   if (msg.t === "need-sync") {
-    Online.send({ t: "sync", state: serializeState(), guestColor: 1 - Online.myColor });
+    Online.send({ t: "sync", state: serializeState(), guestColor: 1 - Online.myColor, score: Online.score });
   } else if (msg.t === "place" && remoteTurn && !g.boards[0][msg.cell] && !g.boards[1][msg.cell]) {
     place(msg.cell);
   } else if (msg.t === "unplace" && remoteTurn && g.placed.includes(msg.cell)) {
     unplace(msg.cell);
+  } else if (msg.t === "resign" && g.winner === null) {
+    resign(1 - Online.myColor);
+  } else if (msg.t === "offer") {
+    if (Online.offer === "me") startAgreedNewGame(); // we both asked: just do it
+    else { Online.offer = "friend"; updateOnlineUI(); }
+  } else if (msg.t === "offer-cancel" || msg.t === "offer-decline") {
+    Online.offer = msg.t === "offer-decline" ? "declined" : null;
+    updateOnlineUI();
   } else if (msg.t === "new") {
     Online.myColor = Online.role === "host" ? msg.hostColor : 1 - msg.hostColor;
     newGame();
+    updateOnlineUI();
   }
 };
 
@@ -161,16 +223,36 @@ function updateOnlineUI() {
   shareRow.hidden = !(on && Online.role === "host" && !Online.connected);
   if (on && Online.code) shareInput.value = Online.shareLink();
   selects.forEach(s => (s.parentElement.hidden = on));
+
+  // score
+  const sc = Online.score, mine = sc[Online.role] || 0, theirs = sc[Online.role === "host" ? "guest" : "host"] || 0;
+  scoreEl.hidden = !(on && (Online.connected || mine + theirs + sc.draws > 0));
+  scoreEl.innerHTML = `Score this session: <b>You ${mine}</b> – <b>${theirs} Friend</b>` +
+    (sc.draws ? ` <span class="muted">(${sc.draws} draw${sc.draws > 1 ? "s" : ""})</span>` : "");
+
+  // new-game offers
+  const offer = on && Online.connected ? Online.offer : null;
+  offerRow.hidden = !offer;
+  acceptBtn.hidden = offer !== "friend";
+  declineBtn.hidden = offer !== "friend" && offer !== "me";
+  declineBtn.textContent = offer === "me" ? "Cancel" : "Decline";
+  offerText.textContent = {
+    friend: "Your friend wants to start a new game.",
+    me: "New game offered – waiting for your friend to agree…",
+    declined: "Your friend declined the new game.",
+  }[offer] || "";
+  resignBtn.hidden = !(on && Online.connected);
+  undoBtn.hidden = on;
   if (g) render();
 }
 
 function onlineNewGame() {
   if (!Online.connected) return;
-  if (g.winner === null && g.history.length && !confirm("Start a new game? The current game will be lost.")) return;
-  // Swap colours each new game so both players get to open.
-  const hostColor = Online.role === "host" ? 1 - Online.myColor : Online.myColor;
-  Online.send({ t: "new", hostColor });
-  Online.onMessage({ t: "new", hostColor });
+  if (Online.offer === "friend") return startAgreedNewGame();
+  if (Online.offer === "me") return;
+  Online.offer = "me";
+  Online.send({ t: "offer" });
+  updateOnlineUI();
 }
 
 // ---------- undo ----------
@@ -204,7 +286,7 @@ function undo() {
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  const size = Math.round(canvas.clientWidth * dpr);
+  const size = Math.min(2400, Math.round(canvas.clientWidth * dpr));
   if (canvas.width !== size) { canvas.width = size; canvas.height = size; }
 }
 
@@ -271,6 +353,23 @@ function render() {
   const humanTurn = g.winner === null && !g.thinking && g.players[g.current] === "human";
   if (humanTurn && hover >= 0 && !g.boards[0][hover] && !g.boards[1][hover]) drawStone(hover, g.current, 0.35);
 
+  // touch preview: ghost stone + crosshair along its row and column
+  if (humanTurn && preview >= 0) {
+    const [x, y] = cellCenter(preview);
+    ctx.strokeStyle = COLORS.stones[g.current];
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1.5, a * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(a / 2, y); ctx.lineTo(W - a / 2, y);
+    ctx.moveTo(x, a / 2); ctx.lineTo(x, W - a / 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    drawStone(preview, g.current, 0.6);
+    ctx.lineWidth = Math.max(2, a * 0.09);
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(x, y, a * 0.5, 0, Math.PI * 2); ctx.stroke();
+  }
+
   // markers: stones of the current turn, otherwise the last completed turn
   const last = g.history[g.history.length - 1];
   const marked = g.placed.length ? g.placed : (last ? last.cells : []);
@@ -293,19 +392,23 @@ function updateStatus() {
   const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)" };
   const who = p => NAMES[p] + tag[g.players[p]];
   let text;
-  if (g.winner === "draw") text = "Draw – the board is full.";
-  else if (g.winner !== null) text = `${who(g.winner)} wins! Press “New game” to play again.`;
+  const again = Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";
+  if (g.winner === "draw") text = `Draw – the board is full. ${again}`;
+  else if (g.resigned !== null) text = `${who(g.resigned)} resigned – ${who(g.winner)} wins! ${again}`;
+  else if (g.winner !== null) text = `${who(g.winner)} wins! ${again}`;
   else if (g.thinking) text = `${who(g.current)} is thinking…`;
   else if (Online.active && !Online.connected) text = `You are ${NAMES[Online.myColor]}. Waiting for your friend…`;
   else if (g.players[g.current] === "remote") text = `${who(g.current)} to move – waiting for their stones…`;
   else {
     const n = stonesThisTurn();
     text = `${who(g.current)} to move – place ${n === 1 ? "1 stone" : `stone ${g.placed.length + 1} of ${n}`}.`;
+    if (preview >= 0) text += " Tap it again to place it.";
   }
   statusEl.textContent = text;
   statusEl.style.color = g.winner === null || g.winner === "draw" ? "" : COLORS.stones[g.winner];
   undoBtn.disabled = Online.active || !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
-  newBtn.disabled = Online.active && !Online.connected;
+  newBtn.disabled = Online.active && (!Online.connected || Online.offer === "me");
+  resignBtn.disabled = g.winner !== null;
 }
 
 // ---------- input ----------
@@ -317,9 +420,63 @@ function eventCell(e) {
   return r >= 0 && r < BS && c >= 0 && c < BS ? r * BS + c : -1;
 }
 
-canvas.addEventListener("click", e => { const c = eventCell(e); if (c >= 0) onHumanClick(c); });
-canvas.addEventListener("mousemove", e => { const c = eventCell(e); if (c !== hover) { hover = c; render(); } });
-canvas.addEventListener("mouseleave", () => { hover = -1; render(); });
+// Mouse: click places directly. Touch/pen: first tap shows a preview, a second
+// tap on the same spot places it (fat fingers on a 19x19 board miss easily).
+function onTap(cell, pointerType) {
+  if (pointerType === "mouse" || g.placed.includes(cell) || cell === preview) {
+    preview = -1;
+    onHumanClick(cell);
+    render();
+    return;
+  }
+  const myTurn = g.winner === null && !g.thinking && g.players[g.current] === "human";
+  if (!myTurn || g.boards[0][cell] || g.boards[1][cell]) return;
+  preview = cell;
+  render();
+}
+
+let down = null;
+canvas.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+canvas.addEventListener("pointercancel", () => { down = null; }); // e.g. the finger started panning
+canvas.addEventListener("pointerup", e => {
+  if (!down || down.id !== e.pointerId) return;
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+  down = null;
+  if (moved > 12 || (e.pointerType === "mouse" && e.button !== 0)) return;
+  const c = eventCell(e);
+  if (c >= 0) onTap(c, e.pointerType);
+});
+canvas.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse") return;
+  const c = eventCell(e);
+  if (c !== hover) { hover = c; render(); }
+});
+canvas.addEventListener("pointerleave", () => { if (hover !== -1) { hover = -1; render(); } });
+
+function setZoom(on) {
+  zoomed = on;
+  boardWrap.classList.toggle("zoomed", on);
+  zoomBtn.textContent = on ? "Zoom out" : "Zoom in";
+  zoomBtn.setAttribute("aria-pressed", on);
+  canvas.style.width = on ? `${boardWrap.clientWidth * 2}px` : "";
+  render();
+  if (on) { // centre the view on the action
+    const last = g.history[g.history.length - 1];
+    const focus = preview >= 0 ? preview : g.placed.length ? g.placed[0] : last ? last.cells[0] : (N - 1) / 2;
+    const a = canvas.clientWidth / BS;
+    boardWrap.scrollLeft = ((focus % BS) + 0.5) * a - boardWrap.clientWidth / 2;
+    boardWrap.scrollTop = (Math.floor(focus / BS) + 0.5) * a - boardWrap.clientHeight / 2;
+  }
+}
+zoomBtn.addEventListener("click", () => setZoom(!zoomed));
+window.addEventListener("resize", () => { if (zoomed) canvas.style.width = `${boardWrap.clientWidth * 2}px`; });
+resignBtn.addEventListener("click", onResignClick);
+acceptBtn.addEventListener("click", () => startAgreedNewGame());
+declineBtn.addEventListener("click", () => {
+  Online.send({ t: Online.offer === "me" ? "offer-cancel" : "offer-decline" });
+  Online.offer = null;
+  updateOnlineUI();
+});
 newBtn.addEventListener("click", () => (Online.active ? onlineNewGame() : newGame()));
 undoBtn.addEventListener("click", undo);
 selects.forEach(s => s.addEventListener("change", newGame));

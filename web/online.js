@@ -5,8 +5,9 @@
 // same stone placements in the same order, so their boards stay identical.
 // When the guest (re)connects, the host sends the full state ("sync").
 //
-// Messages: {t:"place", cell} | {t:"unplace", cell} | {t:"new", hostColor}
-//           | {t:"sync", state, guestColor}
+// Messages: {t:"place", cell} | {t:"unplace", cell} | {t:"resign"}
+//           | {t:"offer"} | {t:"offer-cancel"} | {t:"offer-decline"} | {t:"new", hostColor}
+//           | {t:"sync", state, guestColor, score}
 "use strict";
 
 const PEER_PREFIX = "aronsho-connect6-";
@@ -17,6 +18,8 @@ const Online = {
   code: null,
   myColor: 0,       // 0 = Green, 1 = Red
   connected: false,
+  offer: null,      // new-game offer: null | "me" | "friend" | "declined"
+  score: { host: 0, guest: 0, draws: 0 }, // wins this session, by person
   peer: null,
   conn: null,
   onStatus: () => {},   // set by main.js
@@ -74,7 +77,7 @@ const Online = {
     conn.on("data", msg => {
       if (this.role === "guest" && msg.t === "sync") {
         this.myColor = msg.guestColor;
-        this.onStart(this.myColor, msg.state);
+        this.onStart(this.myColor, msg.state, msg.score);
       } else {
         this.onMessage(msg);
       }
@@ -82,6 +85,7 @@ const Online = {
     conn.on("close", () => {
       if (this.conn !== conn) return;
       this.connected = false;
+      this.offer = null;
       this.status(this.role === "host"
         ? "Your friend disconnected. They can reopen the link to continue."
         : "Connection to the host was lost. Reload the page to reconnect.", true);
@@ -94,7 +98,10 @@ const Online = {
 
   leave() {
     if (this.peer) this.peer.destroy();
-    Object.assign(this, { active: false, role: null, code: null, connected: false, peer: null, conn: null, myColor: 0 });
+    Object.assign(this, {
+      active: false, role: null, code: null, connected: false, peer: null, conn: null, myColor: 0,
+      offer: null, score: { host: 0, guest: 0, draws: 0 },
+    });
   },
 
   status(text, warn = false) { this.onStatus(text, warn); },

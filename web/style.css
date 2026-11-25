@@ -88,9 +88,32 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--text);
 }
 
+#score { margin: 0; font-size: 0.95rem; }
+#score[hidden], .offer-row[hidden], button[hidden] { display: none; }
+.muted { color: var(--muted); }
+.offer-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(227, 197, 58, 0.12); border: 1px solid rgba(227, 197, 58, 0.4);
+}
+.offer-row span { margin-right: 4px; }
+
+.status-row { display: flex; align-items: center; gap: 10px; }
+.status-row #status { flex: 1; }
+button.small { padding: 4px 10px; font-size: 0.85rem; white-space: nowrap; }
+
 #status { margin: 0; min-height: 1.4em; font-weight: 600; }
 
 .board-wrap { display: flex; justify-content: center; }
+.board-wrap.zoomed {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: auto;
+  border-radius: 8px;
+  overscroll-behavior: contain;
+}
+.board-wrap.zoomed canvas { min-width: 0; max-width: none; border-radius: 0; }
 canvas {
   width: min(100%, calc(100vh - 230px));
   min-width: 300px;
@@ -103,6 +126,11 @@ canvas {
 footer { color: var(--muted); font-size: 0.85rem; }
 
 @media (max-width: 520px) {
+  main { padding: 10px 6px; gap: 10px; }
+  header h1 { font-size: 1.35rem; }
+  .rules { font-size: 0.85rem; }
+  .controls { padding: 8px; gap: 8px; }
   .controls button:first-of-type { margin-left: 0; }
-  canvas { width: 100%; }
+  canvas { width: 100%; min-width: 0; border-radius: 4px; }
+  button, select { padding: 8px 12px; } /* bigger touch targets */
 }
