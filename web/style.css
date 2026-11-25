@@ -3,9 +3,10 @@
   --panel: #232326;
   --text: #e8e8ea;
   --muted: #9a9aa2;
-  --p1: #33b864;
-  --p2: #e04848;
-  --accent: #e3c53a;
+  --p1: #3b9be0;
+  --p2: #f0a020;
+  --accent: #e8e8ea;
+  --warn: #f2c94c;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
 }
@@ -73,7 +74,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 #online-info[hidden] { display: none; }
 #online-status { margin: 0; font-size: 0.95rem; }
-#online-status.warn { color: var(--accent); }
+#online-status.warn { color: var(--warn); }
 .share-row { display: flex; gap: 8px; width: 100%; }
 .share-row[hidden] { display: none; }
 .share-row input {
@@ -94,7 +95,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .offer-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 8px 10px; border-radius: 8px;
-  background: rgba(227, 197, 58, 0.12); border: 1px solid rgba(227, 197, 58, 0.4);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.25);
 }
 .offer-row span { margin-right: 4px; }
 

@@ -5,10 +5,10 @@ const COLORS = {
   board: "#26262a",
   line: "#4a4a52",
   star: "#6a6a74",
-  stones: ["#33b864", "#e04848"],
-  marker: "#e3c53a",
+  stones: ["#3b9be0", "#f0a020"], // Okabe–Ito blue / orange: distinguishable with colour blindness
+  marker: "#ffffff",
 };
-const NAMES = ["Green", "Red"];
+const NAMES = ["Blue", "Orange"];
 const BOT_DELAY_MS = 250; // pause before a bot moves, so bot-vs-bot is watchable
 
 const canvas = document.getElementById("board");

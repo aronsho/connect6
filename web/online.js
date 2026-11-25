@@ -16,7 +16,7 @@ const Online = {
   active: false,
   role: null,       // "host" | "guest"
   code: null,
-  myColor: 0,       // 0 = Green, 1 = Red
+  myColor: 0,       // 0 = Blue, 1 = Orange
   connected: false,
   offer: null,      // new-game offer: null | "me" | "friend" | "declined"
   score: { host: 0, guest: 0, draws: 0 }, // wins this session, by person
