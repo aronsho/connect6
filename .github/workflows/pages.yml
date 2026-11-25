@@ -1,4 +1,7 @@
 # Publishes the web/ folder to GitHub Pages on every push to master.
+# Two jobs (build, then deploy) as in GitHub's official Pages template: deploying
+# in the same job that uploaded the artifact sometimes fails with
+# 'No artifacts named "github-pages" were found'.
 name: Deploy web game to GitHub Pages
 
 on:
@@ -14,14 +17,11 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/configure-pages@v6
@@ -30,5 +30,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
