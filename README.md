@@ -16,5 +16,7 @@
   `connect6.js` (rules), `bot.js` (port of the E6 bot), `main.js` (UI)
 - Play locally: open `web/index.html`, or run `python3 -m http.server --directory web` and go to http://localhost:8000
 - Bots: "greedy" plays like `Bot.py` does today; "lookahead" is the 2-ply min/max search that `E6.tree()` was meant to do
+- Online play: "Play a friend online" creates a link; whoever opens it joins the game. Browsers connect
+  peer-to-peer via WebRTC (`online.js`, PeerJS); the free public PeerJS server only introduces them
 - Hosting: `.github/workflows/pages.yml` publishes `web/` to GitHub Pages on every push to `master`
   (one-time setup: repo Settings → Pages → Source: "GitHub Actions")

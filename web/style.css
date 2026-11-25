@@ -40,6 +40,7 @@ header h1 { margin: 0 0 4px; font-size: 1.6rem; letter-spacing: 0.02em; }
   padding: 10px 12px;
   border-radius: 10px;
 }
+.controls label[hidden] { display: none; }
 .controls label { display: flex; align-items: center; gap: 6px; font-size: 0.95rem; }
 select, button {
   font: inherit;
@@ -58,6 +59,34 @@ button:disabled { opacity: 0.45; cursor: default; }
 .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .dot.p1 { background: var(--p1); }
 .dot.p2 { background: var(--p2); }
+
+.online { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+#online-info {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--panel);
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+#online-info[hidden] { display: none; }
+#online-status { margin: 0; font-size: 0.95rem; }
+#online-status.warn { color: var(--accent); }
+.share-row { display: flex; gap: 8px; width: 100%; }
+.share-row[hidden] { display: none; }
+.share-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid #3a3a40;
+  background: #1d1d20;
+  color: var(--text);
+}
 
 #status { margin: 0; min-height: 1.4em; font-weight: 600; }
 

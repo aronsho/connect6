@@ -16,16 +16,26 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const selects = [document.getElementById("p1"), document.getElementById("p2")];
 const undoBtn = document.getElementById("undo");
+const newBtn = document.getElementById("new");
+const hostBtn = document.getElementById("host");
+const onlineInfo = document.getElementById("online-info");
+const onlineStatusEl = document.getElementById("online-status");
+const shareRow = document.getElementById("share-row");
+const shareInput = document.getElementById("share-link");
 
 let g;          // game state
 let gen = 0;    // bumps on new game / undo to cancel pending bot moves
 let hover = -1;
 
+function onlinePlayers() {
+  return Online.myColor === 0 ? ["human", "remote"] : ["remote", "human"];
+}
+
 function newGame() {
   gen++;
   g = {
     boards: [new Uint8Array(N), new Uint8Array(N)],
-    players: selects.map(s => s.value),
+    players: Online.active ? onlinePlayers() : selects.map(s => s.value),
     current: 0,
     placed: [],          // stones placed so far in the current turn
     history: [],         // completed turns: {player, cells}
@@ -43,7 +53,7 @@ function stonesThisTurn() {
 function startTurn() {
   g.placed = [];
   render();
-  if (g.winner === null && g.players[g.current] !== "human") scheduleBot();
+  if (g.winner === null && g.players[g.current].startsWith("bot")) scheduleBot();
 }
 
 function scheduleBot() {
@@ -88,19 +98,85 @@ function endTurn(line) {
 
 function onHumanClick(cell) {
   if (g.winner !== null || g.thinking || g.players[g.current] !== "human") return;
-  const i = g.placed.indexOf(cell);
-  if (i >= 0) { // click own pending stone again: take it back
-    g.boards[g.current][cell] = 0;
-    g.placed.splice(i, 1);
-    render();
+  if (Online.active && !Online.connected) return;
+  if (g.placed.includes(cell)) { // click own pending stone again: take it back
+    unplace(cell);
+    Online.send({ t: "unplace", cell });
     return;
   }
   if (g.boards[0][cell] || g.boards[1][cell]) return;
+  Online.send({ t: "place", cell });
   place(cell);
 }
 
+function unplace(cell) {
+  g.boards[g.current][cell] = 0;
+  g.placed.splice(g.placed.indexOf(cell), 1);
+  render();
+}
+
+// ---------- online ----------
+
+function serializeState() {
+  return {
+    boards: g.boards.map(b => Array.from(b)),
+    current: g.current, placed: g.placed, history: g.history,
+    winner: g.winner, winLine: g.winLine && Array.from(g.winLine),
+  };
+}
+
+Online.onStart = (myColor, state) => {
+  newGame();
+  if (state) {
+    Object.assign(g, state, { boards: state.boards.map(b => Uint8Array.from(b)) });
+    render();
+  }
+  updateOnlineUI();
+};
+
+Online.onMessage = msg => {
+  const remoteTurn = g.winner === null && g.players[g.current] === "remote";
+  if (msg.t === "need-sync") {
+    Online.send({ t: "sync", state: serializeState(), guestColor: 1 - Online.myColor });
+  } else if (msg.t === "place" && remoteTurn && !g.boards[0][msg.cell] && !g.boards[1][msg.cell]) {
+    place(msg.cell);
+  } else if (msg.t === "unplace" && remoteTurn && g.placed.includes(msg.cell)) {
+    unplace(msg.cell);
+  } else if (msg.t === "new") {
+    Online.myColor = Online.role === "host" ? msg.hostColor : 1 - msg.hostColor;
+    newGame();
+  }
+};
+
+Online.onStatus = (text, warn) => {
+  onlineStatusEl.textContent = text;
+  onlineStatusEl.classList.toggle("warn", warn);
+  updateOnlineUI();
+};
+
+function updateOnlineUI() {
+  const on = Online.active;
+  onlineInfo.hidden = !on;
+  hostBtn.hidden = on;
+  shareRow.hidden = !(on && Online.role === "host" && !Online.connected);
+  if (on && Online.code) shareInput.value = Online.shareLink();
+  selects.forEach(s => (s.parentElement.hidden = on));
+  if (g) render();
+}
+
+function onlineNewGame() {
+  if (!Online.connected) return;
+  if (g.winner === null && g.history.length && !confirm("Start a new game? The current game will be lost.")) return;
+  // Swap colours each new game so both players get to open.
+  const hostColor = Online.role === "host" ? 1 - Online.myColor : Online.myColor;
+  Online.send({ t: "new", hostColor });
+  Online.onMessage({ t: "new", hostColor });
+}
+
+// ---------- undo ----------
+
 function undo() {
-  if (!g.players.includes("human")) return;
+  if (Online.active || !g.players.includes("human")) return;
   gen++;
   g.thinking = false;
   for (const c of g.placed) g.boards[g.current][c] = 0;
@@ -214,18 +290,22 @@ function render() {
 }
 
 function updateStatus() {
-  const who = p => `${NAMES[p]}${g.players[p] === "human" ? "" : " (bot)"}`;
+  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)" };
+  const who = p => NAMES[p] + tag[g.players[p]];
   let text;
   if (g.winner === "draw") text = "Draw – the board is full.";
   else if (g.winner !== null) text = `${who(g.winner)} wins! Press “New game” to play again.`;
   else if (g.thinking) text = `${who(g.current)} is thinking…`;
+  else if (Online.active && !Online.connected) text = `You are ${NAMES[Online.myColor]}. Waiting for your friend…`;
+  else if (g.players[g.current] === "remote") text = `${who(g.current)} to move – waiting for their stones…`;
   else {
     const n = stonesThisTurn();
     text = `${who(g.current)} to move – place ${n === 1 ? "1 stone" : `stone ${g.placed.length + 1} of ${n}`}.`;
   }
   statusEl.textContent = text;
   statusEl.style.color = g.winner === null || g.winner === "draw" ? "" : COLORS.stones[g.winner];
-  undoBtn.disabled = !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
+  undoBtn.disabled = Online.active || !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
+  newBtn.disabled = Online.active && !Online.connected;
 }
 
 // ---------- input ----------
@@ -240,9 +320,26 @@ function eventCell(e) {
 canvas.addEventListener("click", e => { const c = eventCell(e); if (c >= 0) onHumanClick(c); });
 canvas.addEventListener("mousemove", e => { const c = eventCell(e); if (c !== hover) { hover = c; render(); } });
 canvas.addEventListener("mouseleave", () => { hover = -1; render(); });
-document.getElementById("new").addEventListener("click", newGame);
+newBtn.addEventListener("click", () => (Online.active ? onlineNewGame() : newGame()));
 undoBtn.addEventListener("click", undo);
 selects.forEach(s => s.addEventListener("change", newGame));
 new ResizeObserver(() => render()).observe(canvas);
 
+hostBtn.addEventListener("click", () => Online.host());
+document.getElementById("leave").addEventListener("click", () => {
+  Online.leave();
+  history.replaceState(null, "", location.pathname);
+  updateOnlineUI();
+  newGame();
+});
+document.getElementById("copy").addEventListener("click", async e => {
+  shareInput.select();
+  try { await navigator.clipboard.writeText(shareInput.value); } catch { document.execCommand("copy"); }
+  e.target.textContent = "Copied!";
+  setTimeout(() => (e.target.textContent = "Copy link"), 1500);
+});
+
 newGame();
+const joinCode = new URLSearchParams(location.search).get("join");
+if (joinCode) Online.join(joinCode);
+updateOnlineUI();
