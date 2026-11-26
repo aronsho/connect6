@@ -32,8 +32,10 @@ const E6_PARAMS = {
 // Killer's search settings.
 //   winDepth:  how many of my turns a forced win may take
 //   safeDepth: how deep to look for the opponent's forced win before playing
-//   budgetMs:  time limit for the threat searches (the bot still always moves)
-const E6_KILLER = { winDepth: 4, safeDepth: 4, budgetMs: 250 };
+//   budgetMs:  time limit per move (the bot always moves in time)
+//   keep:      how many of my best moves to consider (2-ply and safety check)
+//   width:     candidate cells per stone when building those moves
+const E6_KILLER = { winDepth: 5, safeDepth: 5, budgetMs: 1000, keep: 40, width: 25 };
 
 const NSLOT = ALL_SLOTS.length;
 const CELL_SLOTS = (() => {
@@ -137,7 +139,7 @@ class E6Bot {
 
     const pos = new Pos(me, op);
     if (this.level < 3) return this.classic(pos, stones);
-    const t0 = performance.now();
+    const t0 = this.t0 = performance.now();
     this.deadline = t0 + this.lv.budgetMs;
     if (stones === 1) return [this.singleStone(pos)];
 
@@ -156,7 +158,7 @@ class E6Bot {
     this.deadline = t0 + 0.3 * this.lv.budgetMs;
     const win = this.vcf(pos, 0, this.lv.winDepth);
     if (win) return win;
-    this.deadline = t0 + this.lv.budgetMs;
+    this.deadline = t0 + 0.7 * this.lv.budgetMs; // the rest is for breakAttack
 
     // 4. Positional move that doesn't hand the opponent a forced win.
     return this.quiet(pos);
@@ -205,7 +207,7 @@ class E6Bot {
   }
 
   quiet(pos) {
-    const moves = this.findBestMoves(pos, 0, 10);
+    const moves = this.findBestMoves(pos, 0, this.lv.keep, this.lv.width);
     {
       // 2-ply: order my moves by the opponent's best answer.
       for (const m of moves) {
@@ -281,7 +283,7 @@ class E6Bot {
     for (let i = 0; i < cells.length; i++)
       for (let j = i + 1; j < cells.length; j++) moves.push([cells[i], cells[j]]);
     const ranked = this.rank(pos, moves);
-    this.deadline += this.lv.budgetMs; // worth some extra time: the game is at stake
+    this.deadline = this.t0 + this.lv.budgetMs;
     const m = this.pickSafe(pos, ranked, true);
     return m;
   }
@@ -348,14 +350,14 @@ class E6Bot {
 
   // Best pairs of stones for player p (port of find_best_mvs + aposteriori).
   // Returns [{move:[a,b], score}] sorted best first.
-  findBestMoves(pos, p, keep) {
+  findBestMoves(pos, p, keep, width = this.p.evalPri[0]) {
     const me = pos.b[p], op = pos.b[1 - p];
-    const best1 = this.topN(this.apriori(me, op, 4, this.p.mePri1, this.p.opPri1), me, op, this.p.evalPri[0]);
+    const best1 = this.topN(this.apriori(me, op, 4, this.p.mePri1, this.p.opPri1), me, op, width);
     const seen = new Set();
     const scored = [];
     for (const a of best1) {
       pos.put(a, p);
-      const best2 = this.topN(this.apriori(me, op, 5, this.p.mePri2, this.p.opPri2), me, op, this.p.evalPri[1]);
+      const best2 = this.topN(this.apriori(me, op, 5, this.p.mePri2, this.p.opPri2), me, op, width);
       for (const b of best2) {
         const key = a < b ? a * N + b : b * N + a;
         if (seen.has(key)) continue;
