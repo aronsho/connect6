@@ -11,7 +11,10 @@
 <body>
   <main>
     <header>
-      <h1>Connect6</h1>
+      <div class="title-row">
+        <h1>Connect6</h1>
+        <button id="tutorial-btn" class="small">Tutorial</button>
+      </div>
       <p class="rules">Get <b>six in a row</b> (any direction). Blue opens with one stone, then each player places <b>two stones</b> per turn.</p>
     </header>
 
@@ -62,16 +65,21 @@
       <canvas id="board" aria-label="Connect6 board"></canvas>
     </div>
 
-    <footer>
-      Tips: click your first stone again to take it back before placing the second.
-      On a phone, tap once to preview a stone and tap it again to place it; use “Zoom in” for a bigger board.
-    </footer>
+    <div id="tutorial" class="tutorial" role="region" aria-label="Tutorial" hidden>
+      <div class="tut-head"><span id="tut-progress"></span></div>
+      <p id="tut-text" aria-live="polite"></p>
+      <div class="tut-actions">
+        <button id="tut-stop" class="secondary">Stop tutorial</button>
+        <button id="tut-next">Next</button>
+      </div>
+    </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
   <script src="connect6.js?v=dev"></script>
   <script src="online.js?v=dev"></script>
   <script src="bot.js?v=dev"></script>
+  <script src="tutorial.js?v=dev"></script>
   <script src="main.js?v=dev"></script>
 </body>
 </html>

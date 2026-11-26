@@ -45,7 +45,7 @@ function newGame() {
   gen++;
   g = {
     boards: [new Uint8Array(N), new Uint8Array(N)],
-    players: Online.active ? onlinePlayers() : selects.map(s => s.value),
+    players: Online.active ? onlinePlayers() : Tutorial.active ? ["human", "script"] : selects.map(s => s.value),
     current: 0,
     placed: [],          // stones placed so far in the current turn
     history: [],         // completed turns: {player, cells}
@@ -243,6 +243,7 @@ function updateOnlineUI() {
   }[offer] || "";
   resignBtn.hidden = !(on && Online.connected);
   undoBtn.hidden = on;
+  document.getElementById("tutorial-btn").hidden = on || Tutorial.active;
   if (g) render();
 }
 
@@ -351,7 +352,8 @@ function render() {
 
   // hover preview
   const humanTurn = g.winner === null && !g.thinking && g.players[g.current] === "human";
-  if (humanTurn && hover >= 0 && !g.boards[0][hover] && !g.boards[1][hover]) drawStone(hover, g.current, 0.35);
+  if (humanTurn && hover >= 0 && !g.boards[0][hover] && !g.boards[1][hover] && (!Tutorial.active || Tutorial.allows(hover)))
+    drawStone(hover, g.current, 0.35);
 
   // touch preview: ghost stone + crosshair along its row and column
   if (humanTurn && preview >= 0) {
@@ -385,14 +387,16 @@ function render() {
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   }
 
+  Tutorial.draw(ctx, a);
   updateStatus();
+  Tutorial.update();
 }
 
 function updateStatus() {
-  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)" };
+  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)", script: "" };
   const who = p => NAMES[p] + tag[g.players[p]];
   let text;
-  const again = Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";
+  const again = Tutorial.active ? "" : Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";
   if (g.winner === "draw") text = `Draw – the board is full. ${again}`;
   else if (g.resigned !== null) text = `${who(g.resigned)} resigned – ${who(g.winner)} wins! ${again}`;
   else if (g.winner !== null) text = `${who(g.winner)} wins! ${again}`;
@@ -406,7 +410,7 @@ function updateStatus() {
   }
   statusEl.textContent = text;
   statusEl.style.color = g.winner === null || g.winner === "draw" ? "" : COLORS.stones[g.winner];
-  undoBtn.disabled = Online.active || !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
+  undoBtn.disabled = Online.active || Tutorial.active || !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
   newBtn.disabled = Online.active && (!Online.connected || Online.offer === "me");
   resignBtn.disabled = g.winner !== null;
 }
@@ -423,6 +427,7 @@ function eventCell(e) {
 // Mouse: click places directly. Touch/pen: first tap shows a preview, a second
 // tap on the same spot places it (fat fingers on a 19x19 board miss easily).
 function onTap(cell, pointerType) {
+  if (Tutorial.active && !Tutorial.allows(cell)) return Tutorial.nudge();
   if (pointerType === "mouse" || g.placed.includes(cell) || cell === preview) {
     preview = -1;
     onHumanClick(cell);
@@ -436,7 +441,10 @@ function onTap(cell, pointerType) {
 }
 
 let down = null;
-canvas.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+canvas.addEventListener("pointerdown", e => {
+  down = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  Tutorial.touch = e.pointerType !== "mouse";
+});
 canvas.addEventListener("pointercancel", () => { down = null; }); // e.g. the finger started panning
 canvas.addEventListener("pointerup", e => {
   if (!down || down.id !== e.pointerId) return;
@@ -462,11 +470,15 @@ function setZoom(on) {
   render();
   if (on) { // centre the view on the action
     const last = g.history[g.history.length - 1];
-    const focus = preview >= 0 ? preview : g.placed.length ? g.placed[0] : last ? last.cells[0] : (N - 1) / 2;
-    const a = canvas.clientWidth / BS;
-    boardWrap.scrollLeft = ((focus % BS) + 0.5) * a - boardWrap.clientWidth / 2;
-    boardWrap.scrollTop = (Math.floor(focus / BS) + 0.5) * a - boardWrap.clientHeight / 2;
+    scrollBoardTo(preview >= 0 ? preview : g.placed.length ? g.placed[0] : last ? last.cells[0] : (N - 1) / 2);
   }
+}
+
+// When zoomed in, scroll the board so that this cell is in the middle.
+function scrollBoardTo(cell) {
+  const a = canvas.clientWidth / BS;
+  boardWrap.scrollLeft = ((cell % BS) + 0.5) * a - boardWrap.clientWidth / 2;
+  boardWrap.scrollTop = (Math.floor(cell / BS) + 0.5) * a - boardWrap.clientHeight / 2;
 }
 zoomBtn.addEventListener("click", () => setZoom(!zoomed));
 window.addEventListener("resize", () => { if (zoomed) canvas.style.width = `${boardWrap.clientWidth * 2}px`; });
