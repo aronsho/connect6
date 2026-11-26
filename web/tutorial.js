@@ -33,18 +33,7 @@ const TUTORIAL_STEPS = [
     done: () => g.history.length >= 2,
   },
   {
-    text: () => `Your turn – two stones. ${verb()} the marked spot for your first one.`,
-    cells: [at(9, 10)],
-    done: () => g.placed.includes(at(9, 10)),
-  },
-  {
-    text: () => `Changed your mind? Until your second stone is down, you can take the first one back. ${Tutorial.touch ? "Tap it once" : "Click it again"} to remove it.`,
-    cells: [at(9, 10)],
-    takeBack: true,
-    done: () => !g.boards[0][at(9, 10)],
-  },
-  {
-    text: () => `Now place <b>both</b> stones on the marked spots. Your turn ends as soon as the second one is down.`,
+    text: () => `Your turn – now you place <b>two stones</b>. Put them on the marked spots; your turn ends as soon as the second one is down.`,
     cells: [at(9, 10), at(9, 11)],
     done: () => g.history.length >= 3,
   },
@@ -54,7 +43,18 @@ const TUTORIAL_STEPS = [
     done: () => g.history.length >= 4,
   },
   {
-    text: () => `You have <b>three in a row</b>. Make it five with the marked spots.`,
+    text: () => `You have <b>three in a row</b>. ${verb()} the marked spot for your first stone of this turn.`,
+    cells: [at(9, 12)],
+    done: () => g.placed.includes(at(9, 12)),
+  },
+  {
+    text: () => `Changed your mind? Until your second stone is down, you can take the first one back. ${Tutorial.touch ? "Tap it once" : "Click it again"} to remove it.`,
+    cells: [at(9, 12)],
+    takeBack: true,
+    done: () => !g.boards[0][at(9, 12)],
+  },
+  {
+    text: () => `Now place both stones on the marked spots to make <b>five in a row</b>.`,
     cells: [at(9, 12), at(9, 13)],
     done: () => g.history.length >= 5,
   },
