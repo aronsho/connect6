@@ -1,7 +1,7 @@
 // E6 bot: port of class E6 in Bot.py, in three levels.
 //
-// level 1 ("greedy")    – what Bot.py plays: the best-scoring pair of stones.
-// level 2 ("lookahead") – the 2-ply min/max search that E6.tree() was meant to
+// level 1 ("medium", greedy)    – what Bot.py plays: the best-scoring pair of stones.
+// level 2 ("expert", lookahead) – the 2-ply min/max search that E6.tree() was meant to
 //                         do: for each of my 6 best moves, assume the opponent's
 //                         best reply, and pick the move that leaves them worst off.
 // level 3 ("killer")    – lookahead plus a threat-based tactical layer.

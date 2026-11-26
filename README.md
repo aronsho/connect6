@@ -15,8 +15,8 @@
 - `web/` contains a browser version of the game (plain HTML/JS, no build step):
   `connect6.js` (rules), `bot.js` (port of the E6 bot), `main.js` (UI)
 - Play locally: open `web/index.html`, or run `python3 -m http.server --directory web` and go to http://localhost:8000
-- Bots: "greedy" plays like `Bot.py` does today; "lookahead" is the 2-ply min/max search that `E6.tree()` was meant to do;
-  "killer" is lookahead plus a threat-space search (win if possible, block threats, find forced wins made of double
+- Bots: "medium" (greedy) plays like `Bot.py` does today; "expert" (lookahead) is the 2-ply min/max search that `E6.tree()` was meant to do;
+  "killer" is expert plus a threat-space search (win if possible, block threats, find forced wins made of double
   threats, and avoid moves that let the opponent start one). Its settings are in `E6_KILLER` in `bot.js`
 - Online play: "Play a friend online" creates a link; whoever opens it joins the game. Browsers connect
   peer-to-peer via WebRTC (`online.js`, PeerJS); the free public PeerJS server only introduces them
