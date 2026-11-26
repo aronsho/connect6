@@ -16,6 +16,8 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const selects = [document.getElementById("p1"), document.getElementById("p2")];
 const undoBtn = document.getElementById("undo");
+const pauseBtn = document.getElementById("pause");
+const stepBtn = document.getElementById("step");
 const newBtn = document.getElementById("new");
 const hostBtn = document.getElementById("host");
 const onlineInfo = document.getElementById("online-info");
@@ -53,6 +55,7 @@ function newGame() {
     winLine: null,
     resigned: null,      // colour that resigned, if any
     thinking: false,
+    paused: false,       // bot vs bot only: stop between turns to look at the game
   };
   Online.offer = null;
   startTurn();
@@ -66,7 +69,31 @@ function startTurn() {
   g.placed = [];
   preview = -1;
   render();
-  if (g.winner === null && g.players[g.current].startsWith("bot")) scheduleBot();
+  if (g.winner === null && !g.paused && g.players[g.current].startsWith("bot")) scheduleBot();
+}
+
+// Both players are bots (and this isn't online play or the tutorial).
+function botsOnly() {
+  return !Online.active && !Tutorial.active && g.players.every(p => p.startsWith("bot"));
+}
+
+function togglePause() {
+  if (!botsOnly()) return;
+  if (g.paused) {
+    g.paused = false;
+    startTurn();
+  } else {
+    g.paused = true;
+    gen++;             // drop the move being thought about; it is redone on resume
+    g.thinking = false;
+    render();
+  }
+}
+
+// While paused: let the bot to move play one turn, then stay paused.
+function step() {
+  if (!botsOnly() || !g.paused || g.thinking || g.winner !== null) return;
+  scheduleBot();
 }
 
 function scheduleBot() {
@@ -265,6 +292,7 @@ function onlineNewGame() {
 // ---------- undo ----------
 
 function undo() {
+  if (botsOnly()) return undoBotTurn();
   if (Online.active || !g.players.includes("human")) return;
   gen++;
   g.thinking = false;
@@ -285,6 +313,22 @@ function undo() {
   if (g.players[g.current] !== "human") { // nothing human left to undo to
     newGame();
     return;
+  }
+  startTurn();
+}
+
+// Bot vs bot: take back the last turn and pause, so the game can be stepped
+// backwards and forwards.
+function undoBotTurn() {
+  gen++;
+  g.thinking = false;
+  g.paused = true;
+  const t = g.history.pop();
+  if (t) {
+    for (const c of t.cells) g.boards[t.player][c] = 0;
+    g.current = t.player;
+    g.winner = null;
+    g.winLine = null;
   }
   startTurn();
 }
@@ -407,6 +451,7 @@ function updateStatus() {
   else if (g.resigned !== null) text = `${who(g.resigned)} resigned – ${who(g.winner)} wins! ${again}`;
   else if (g.winner !== null) text = `${who(g.winner)} wins! ${again}`;
   else if (g.thinking) text = `${who(g.current)} is thinking…`;
+  else if (g.paused) text = `Paused – ${who(g.current)} to move. Press “Resume” or “Step”.`;
   else if (Online.active && !Online.connected) text = `You are ${NAMES[Online.myColor]}. Waiting for your friend…`;
   else if (g.players[g.current] === "remote") text = `${who(g.current)} to move – waiting for their stones…`;
   else {
@@ -416,7 +461,12 @@ function updateStatus() {
   }
   statusEl.textContent = text;
   statusEl.style.color = g.winner === null || g.winner === "draw" ? "" : COLORS.stones[g.winner];
-  undoBtn.disabled = Online.active || Tutorial.active || !g.players.includes("human") || (g.history.length === 0 && g.placed.length === 0);
+  const bots = botsOnly();
+  undoBtn.disabled = Online.active || Tutorial.active || (g.history.length === 0 && g.placed.length === 0);
+  pauseBtn.hidden = stepBtn.hidden = !bots;
+  pauseBtn.textContent = g.paused ? "Resume" : "Pause";
+  pauseBtn.disabled = g.winner !== null;
+  stepBtn.disabled = !g.paused || g.thinking || g.winner !== null;
   newBtn.disabled = Online.active && (!Online.connected || Online.offer === "me");
   resignBtn.disabled = g.winner !== null;
 }
@@ -497,6 +547,8 @@ declineBtn.addEventListener("click", () => {
 });
 newBtn.addEventListener("click", () => (Online.active ? onlineNewGame() : newGame()));
 undoBtn.addEventListener("click", undo);
+pauseBtn.addEventListener("click", togglePause);
+stepBtn.addEventListener("click", step);
 selects.forEach(s => s.addEventListener("change", newGame));
 new ResizeObserver(() => render()).observe(canvas);
 
