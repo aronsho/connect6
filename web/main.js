@@ -9,7 +9,6 @@ const COLORS = {
   marker: "#ffffff",
 };
 const NAMES = ["Blue", "Orange"];
-const BOT_DELAY_MS = 250; // pause before a bot moves, so bot-vs-bot is watchable
 
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
@@ -100,25 +99,21 @@ function scheduleBot() {
   const myGen = gen;
   g.thinking = true;
   render();
-  // Think right away (after the "thinking" status has painted), then wait out
-  // the rest of BOT_DELAY_MS, so thinking time doesn't add to the pause.
-  setTimeout(() => {
+  // No added delay: the bot moves as soon as it has thought. Waiting for the
+  // next frame first lets the board and "thinking" status paint.
+  requestAnimationFrame(() => setTimeout(() => {
     if (myGen !== gen) return;
     const me = g.boards[g.current], op = g.boards[1 - g.current];
     const bot = new E6Bot(+g.players[g.current].slice(3));
     const t0 = performance.now();
     const cells = bot.getMove(me, op, stonesThisTurn());
-    const ms = performance.now() - t0;
-    console.log(`${NAMES[g.current]} bot (${g.players[g.current]}) moved in ${ms.toFixed(0)} ms`);
-    setTimeout(() => {
-      if (myGen !== gen) return;
-      g.thinking = false;
-      for (const c of cells) {
-        place(c);
-        if (g.winner !== null) return;
-      }
-    }, Math.max(0, BOT_DELAY_MS - ms));
-  }, 20);
+    console.log(`${NAMES[g.current]} bot (${g.players[g.current]}) moved in ${(performance.now() - t0).toFixed(0)} ms`);
+    g.thinking = false;
+    for (const c of cells) {
+      place(c);
+      if (g.winner !== null) return;
+    }
+  }, 0));
 }
 
 function place(cell) {
