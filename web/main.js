@@ -9,7 +9,7 @@ const COLORS = {
   marker: "#ffffff",
 };
 const NAMES = ["Blue", "Orange"];
-const BOT_MIN_MS = 250; // a bot move takes at least this long (thinking included), so games are watchable
+const BOT_MIN_MS = 500; // a bot move takes at least this long (thinking included), so games are watchable
 
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
@@ -17,6 +17,7 @@ const statusEl = document.getElementById("status");
 const selects = [document.getElementById("p1"), document.getElementById("p2")];
 const undoBtn = document.getElementById("undo");
 const pauseBtn = document.getElementById("pause");
+const browseEl = document.getElementById("browse");
 const backBtn = document.getElementById("back");
 const fwdBtn = document.getElementById("fwd");
 const newBtn = document.getElementById("new");
@@ -58,7 +59,9 @@ function newGame() {
     thinking: false,
     paused: false,       // bot vs bot only: stop between turns to look at the game
     view: null,          // bot vs bot only: number of turns shown while browsing, null = live
+    started: false,      // bot vs bot only: waits for "Start" before the first move
   };
+  if (botsOnly()) g.paused = true;
   Online.offer = null;
   startTurn();
 }
@@ -91,6 +94,7 @@ function togglePause() {
   if (!botsOnly()) return;
   if (g.paused) {
     g.paused = false;
+    g.started = true;
     g.view = null;
     startTurn();
   } else {
@@ -114,6 +118,7 @@ function forward() {
     g.view = g.view + 1 >= g.history.length ? null : g.view + 1;
     render();
   } else if (g.paused && !g.thinking && g.winner === null) {
+    g.started = true;
     scheduleBot();
   }
 }
@@ -461,6 +466,7 @@ function updateStatus() {
   else if (g.resigned !== null) text = `${who(g.resigned)} resigned – ${who(g.winner)} wins! ${again}`;
   else if (g.winner !== null) text = `${who(g.winner)} wins! ${again}`;
   else if (g.thinking) text = `${who(g.current)} is thinking…`;
+  else if (g.paused && !g.started) text = `Press “Start” to let the bots play (or ▶ to go one turn at a time).`;
   else if (g.paused) text = `Paused – ${who(g.current)} to move. ◀ ▶ (or the arrow keys) go through the moves.`;
   else if (Online.active && !Online.connected) text = `You are ${NAMES[Online.myColor]}. Waiting for your friend…`;
   else if (g.players[g.current] === "remote") text = `${who(g.current)} to move – waiting for their stones…`;
@@ -474,8 +480,9 @@ function updateStatus() {
   const bots = botsOnly();
   undoBtn.hidden = Online.active || bots;
   undoBtn.disabled = Online.active || Tutorial.active || (g.history.length === 0 && g.placed.length === 0);
-  pauseBtn.hidden = backBtn.hidden = fwdBtn.hidden = !bots;
-  pauseBtn.textContent = g.paused ? "Resume" : "Pause";
+  pauseBtn.hidden = browseEl.hidden = !bots;
+  pauseBtn.textContent = !g.started ? "Start" : g.paused ? "Resume" : "Pause";
+  pauseBtn.classList.toggle("secondary", g.started); // "Start" stands out
   pauseBtn.disabled = g.winner !== null && g.view === null;
   backBtn.disabled = (g.view ?? g.history.length) === 0;
   fwdBtn.disabled = g.view === null && (g.winner !== null || g.thinking);
