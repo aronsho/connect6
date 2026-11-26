@@ -9,6 +9,7 @@ const COLORS = {
   marker: "#ffffff",
 };
 const NAMES = ["Blue", "Orange"];
+const BOT_MIN_MS = 250; // a bot move takes at least this long (thinking included), so games are watchable
 
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
@@ -16,7 +17,8 @@ const statusEl = document.getElementById("status");
 const selects = [document.getElementById("p1"), document.getElementById("p2")];
 const undoBtn = document.getElementById("undo");
 const pauseBtn = document.getElementById("pause");
-const stepBtn = document.getElementById("step");
+const backBtn = document.getElementById("back");
+const fwdBtn = document.getElementById("fwd");
 const newBtn = document.getElementById("new");
 const hostBtn = document.getElementById("host");
 const onlineInfo = document.getElementById("online-info");
@@ -55,6 +57,7 @@ function newGame() {
     resigned: null,      // colour that resigned, if any
     thinking: false,
     paused: false,       // bot vs bot only: stop between turns to look at the game
+    view: null,          // bot vs bot only: number of turns shown while browsing, null = live
   };
   Online.offer = null;
   startTurn();
@@ -76,44 +79,69 @@ function botsOnly() {
   return !Online.active && !Tutorial.active && g.players.every(p => p.startsWith("bot"));
 }
 
+function pause() {
+  if (g.paused) return;
+  g.paused = true;
+  gen++;             // drop the move being thought about; it is redone on resume
+  g.thinking = false;
+}
+
+// Resume always continues the game from its latest position.
 function togglePause() {
   if (!botsOnly()) return;
   if (g.paused) {
     g.paused = false;
+    g.view = null;
     startTurn();
   } else {
-    g.paused = true;
-    gen++;             // drop the move being thought about; it is redone on resume
-    g.thinking = false;
+    pause();
     render();
   }
 }
 
-// While paused: let the bot to move play one turn, then stay paused.
-function step() {
-  if (!botsOnly() || !g.paused || g.thinking || g.winner !== null) return;
-  scheduleBot();
+// Browse the game one turn back (pausing it first).
+function back() {
+  if (!botsOnly()) return;
+  pause();
+  g.view = Math.max(0, (g.view ?? g.history.length) - 1);
+  render();
+}
+
+// One turn forward; at the latest position, play a new turn (staying paused).
+function forward() {
+  if (!botsOnly()) return;
+  if (g.view !== null) {
+    g.view = g.view + 1 >= g.history.length ? null : g.view + 1;
+    render();
+  } else if (g.paused && !g.thinking && g.winner === null) {
+    scheduleBot();
+  }
 }
 
 function scheduleBot() {
   const myGen = gen;
   g.thinking = true;
   render();
-  // No added delay: the bot moves as soon as it has thought. Waiting for the
-  // next frame first lets the board and "thinking" status paint.
-  requestAnimationFrame(() => setTimeout(() => {
+  // Think right away (after a moment, so the board and "thinking" status
+  // paint first), then wait out the rest of BOT_MIN_MS: thinking time counts
+  // toward the minimum instead of adding to it.
+  const start = performance.now();
+  setTimeout(() => {
     if (myGen !== gen) return;
     const me = g.boards[g.current], op = g.boards[1 - g.current];
     const bot = new E6Bot(+g.players[g.current].slice(3));
     const t0 = performance.now();
     const cells = bot.getMove(me, op, stonesThisTurn());
     console.log(`${NAMES[g.current]} bot (${g.players[g.current]}) moved in ${(performance.now() - t0).toFixed(0)} ms`);
-    g.thinking = false;
-    for (const c of cells) {
-      place(c);
-      if (g.winner !== null) return;
-    }
-  }, 0));
+    setTimeout(() => {
+      if (myGen !== gen) return;
+      g.thinking = false;
+      for (const c of cells) {
+        place(c);
+        if (g.winner !== null) return;
+      }
+    }, Math.max(0, BOT_MIN_MS - (performance.now() - start)));
+  }, 20);
 }
 
 function place(cell) {
@@ -287,7 +315,6 @@ function onlineNewGame() {
 // ---------- undo ----------
 
 function undo() {
-  if (botsOnly()) return undoBotTurn();
   if (Online.active || !g.players.includes("human")) return;
   gen++;
   g.thinking = false;
@@ -308,22 +335,6 @@ function undo() {
   if (g.players[g.current] !== "human") { // nothing human left to undo to
     newGame();
     return;
-  }
-  startTurn();
-}
-
-// Bot vs bot: take back the last turn and pause, so the game can be stepped
-// backwards and forwards.
-function undoBotTurn() {
-  gen++;
-  g.thinking = false;
-  g.paused = true;
-  const t = g.history.pop();
-  if (t) {
-    for (const c of t.cells) g.boards[t.player][c] = 0;
-    g.current = t.player;
-    g.winner = null;
-    g.winLine = null;
   }
   startTurn();
 }
@@ -389,8 +400,11 @@ function render() {
     ctx.beginPath(); ctx.arc(x, y, a * 0.09, 0, Math.PI * 2); ctx.fill();
   }
 
-  // stones
-  for (let i = 0; i < N; i++) {
+  // stones (while browsing a bot game: only the first g.view turns)
+  const browsing = g.view !== null;
+  const shown = browsing ? g.history.slice(0, g.view) : null;
+  if (browsing) for (const t of shown) t.cells.forEach(c => drawStone(c, t.player));
+  else for (let i = 0; i < N; i++) {
     if (g.boards[0][i]) drawStone(i, 0);
     else if (g.boards[1][i]) drawStone(i, 1);
   }
@@ -418,12 +432,12 @@ function render() {
   }
 
   // markers: stones of the current turn, otherwise the last completed turn
-  const last = g.history[g.history.length - 1];
-  const marked = g.placed.length ? g.placed : (last ? last.cells : []);
+  const last = browsing ? shown[shown.length - 1] : g.history[g.history.length - 1];
+  const marked = g.placed.length && !browsing ? g.placed : (last ? last.cells : []);
   marked.forEach(drawMarker);
 
   // winning line
-  if (g.winLine) {
+  if (g.winLine && !browsing) {
     const [x1, y1] = cellCenter(g.winLine[0]);
     const [x2, y2] = cellCenter(g.winLine[WIN - 1]);
     ctx.strokeStyle = COLORS.marker;
@@ -442,11 +456,12 @@ function updateStatus() {
   const who = p => NAMES[p] + tag[g.players[p]];
   let text;
   const again = Tutorial.active ? "" : Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";
-  if (g.winner === "draw") text = `Draw – the board is full. ${again}`;
+  if (g.view !== null) text = `Viewing turn ${g.view} of ${g.history.length} – use ◀ ▶ (or the arrow keys) to browse; “Resume” continues the game.`;
+  else if (g.winner === "draw") text = `Draw – the board is full. ${again}`;
   else if (g.resigned !== null) text = `${who(g.resigned)} resigned – ${who(g.winner)} wins! ${again}`;
   else if (g.winner !== null) text = `${who(g.winner)} wins! ${again}`;
   else if (g.thinking) text = `${who(g.current)} is thinking…`;
-  else if (g.paused) text = `Paused – ${who(g.current)} to move. Press “Resume” or “Step”.`;
+  else if (g.paused) text = `Paused – ${who(g.current)} to move. ◀ ▶ (or the arrow keys) go through the moves.`;
   else if (Online.active && !Online.connected) text = `You are ${NAMES[Online.myColor]}. Waiting for your friend…`;
   else if (g.players[g.current] === "remote") text = `${who(g.current)} to move – waiting for their stones…`;
   else {
@@ -457,11 +472,13 @@ function updateStatus() {
   statusEl.textContent = text;
   statusEl.style.color = g.winner === null || g.winner === "draw" ? "" : COLORS.stones[g.winner];
   const bots = botsOnly();
+  undoBtn.hidden = Online.active || bots;
   undoBtn.disabled = Online.active || Tutorial.active || (g.history.length === 0 && g.placed.length === 0);
-  pauseBtn.hidden = stepBtn.hidden = !bots;
+  pauseBtn.hidden = backBtn.hidden = fwdBtn.hidden = !bots;
   pauseBtn.textContent = g.paused ? "Resume" : "Pause";
-  pauseBtn.disabled = g.winner !== null;
-  stepBtn.disabled = !g.paused || g.thinking || g.winner !== null;
+  pauseBtn.disabled = g.winner !== null && g.view === null;
+  backBtn.disabled = (g.view ?? g.history.length) === 0;
+  fwdBtn.disabled = g.view === null && (g.winner !== null || g.thinking);
   newBtn.disabled = Online.active && (!Online.connected || Online.offer === "me");
   resignBtn.disabled = g.winner !== null;
 }
@@ -543,7 +560,13 @@ declineBtn.addEventListener("click", () => {
 newBtn.addEventListener("click", () => (Online.active ? onlineNewGame() : newGame()));
 undoBtn.addEventListener("click", undo);
 pauseBtn.addEventListener("click", togglePause);
-stepBtn.addEventListener("click", step);
+backBtn.addEventListener("click", back);
+fwdBtn.addEventListener("click", forward);
+document.addEventListener("keydown", e => {
+  if (!g || !botsOnly() || e.target.closest("select, input, textarea")) return;
+  if (e.key === "ArrowLeft") { back(); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { forward(); e.preventDefault(); }
+});
 selects.forEach(s => s.addEventListener("change", newGame));
 new ResizeObserver(() => render()).observe(canvas);
 
