@@ -73,19 +73,25 @@ function scheduleBot() {
   const myGen = gen;
   g.thinking = true;
   render();
+  // Think right away (after the "thinking" status has painted), then wait out
+  // the rest of BOT_DELAY_MS, so thinking time doesn't add to the pause.
   setTimeout(() => {
     if (myGen !== gen) return;
     const me = g.boards[g.current], op = g.boards[1 - g.current];
-    const bot = new E6Bot(g.players[g.current] === "bot2" ? 2 : 1);
+    const bot = new E6Bot(+g.players[g.current].slice(3));
     const t0 = performance.now();
     const cells = bot.getMove(me, op, stonesThisTurn());
-    console.log(`${NAMES[g.current]} bot (${g.players[g.current]}) moved in ${(performance.now() - t0).toFixed(0)} ms`);
-    g.thinking = false;
-    for (const c of cells) {
-      place(c);
-      if (g.winner !== null) return;
-    }
-  }, BOT_DELAY_MS);
+    const ms = performance.now() - t0;
+    console.log(`${NAMES[g.current]} bot (${g.players[g.current]}) moved in ${ms.toFixed(0)} ms`);
+    setTimeout(() => {
+      if (myGen !== gen) return;
+      g.thinking = false;
+      for (const c of cells) {
+        place(c);
+        if (g.winner !== null) return;
+      }
+    }, Math.max(0, BOT_DELAY_MS - ms));
+  }, 20);
 }
 
 function place(cell) {
@@ -393,7 +399,7 @@ function render() {
 }
 
 function updateStatus() {
-  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)", script: "" };
+  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)", bot3: " (bot)", script: "" };
   const who = p => NAMES[p] + tag[g.players[p]];
   let text;
   const again = Tutorial.active ? "" : Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";

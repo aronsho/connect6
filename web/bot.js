@@ -1,22 +1,21 @@
-// E6 bot: port of class E6 in Bot.py, plus a threat-based tactical layer.
+// E6 bot: port of class E6 in Bot.py, in three levels.
 //
-// Positional play is the E6 heuristic from Bot.py:
-// depth 1 ("greedy")    – picks the best-scoring pair of stones.
-// depth 2 ("lookahead") – 2-ply min/max: for each of my best moves, assume the
-//                         opponent's best reply, and pick the move that leaves
-//                         them worst off.
+// level 1 ("greedy")    – what Bot.py plays: the best-scoring pair of stones.
+// level 2 ("lookahead") – the 2-ply min/max search that E6.tree() was meant to
+//                         do: for each of my 6 best moves, assume the opponent's
+//                         best reply, and pick the move that leaves them worst off.
+// level 3 ("killer")    – lookahead plus a threat-based tactical layer.
 //
-// On top of that, both bots understand Connect6 threats. A "threat" is a run of
-// 6 cells holding 4 or 5 of one player's stones and none of the other's: it can
-// be completed in a single turn. Every turn the bot
+// Killer understands Connect6 threats. A "threat" is a run of 6 cells holding
+// 4 or 5 of one player's stones and none of the other's: it can be completed
+// in a single turn. Every turn it
 //   1. wins if it can,
 //   2. otherwise blocks all of the opponent's threats (if possible),
 //   3. otherwise looks for a forced win: a sequence of moves that each leave
 //      the opponent two threats (both stones are needed to block), ending in
 //      three threats, which cannot be blocked ("threat-space search"),
-//   4. otherwise plays positionally, but skips moves that let the opponent
-//      start such a forced win.
-// The lookahead bot searches these sequences deeper than the greedy one.
+//   4. otherwise plays the lookahead move, but skips moves that let the
+//      opponent start such a forced win.
 "use strict";
 
 const E6_PARAMS = {
@@ -30,14 +29,11 @@ const E6_PARAMS = {
   opPos: [1 / 6, 1, 10 / 4, 1000, 1000, 1000],
 };
 
-// Search settings per bot depth.
+// Killer's search settings.
 //   winDepth:  how many of my turns a forced win may take
 //   safeDepth: how deep to look for the opponent's forced win before playing
 //   budgetMs:  time limit for the threat searches (the bot still always moves)
-const E6_LEVELS = {
-  1: { winDepth: 2, safeDepth: 1, budgetMs: 40 },
-  2: { winDepth: 3, safeDepth: 2, budgetMs: 250 },
-};
+const E6_KILLER = { winDepth: 4, safeDepth: 4, budgetMs: 250 };
 
 const NSLOT = ALL_SLOTS.length;
 const CELL_SLOTS = (() => {
@@ -126,10 +122,10 @@ class Pos {
 }
 
 class E6Bot {
-  constructor(depth = 1, params = E6_PARAMS) {
-    this.depth = depth;
+  constructor(level = 1, params = E6_PARAMS) {
+    this.level = level;
     this.p = params;
-    this.lv = E6_LEVELS[depth >= 2 ? 2 : 1];
+    this.lv = E6_KILLER;
   }
 
   // me, op: Uint8Array(N) of my / opponent's stones. stones: 1 or 2.
@@ -140,6 +136,7 @@ class E6Bot {
     if (empty) return [Math.floor(BS / 2) * BS + Math.floor(BS / 2)]; // first move: centre
 
     const pos = new Pos(me, op);
+    if (this.level < 3) return this.classic(pos, stones);
     const t0 = performance.now();
     this.deadline = t0 + this.lv.budgetMs;
     if (stones === 1) return [this.singleStone(pos)];
@@ -163,6 +160,24 @@ class E6Bot {
 
     // 4. Positional move that doesn't hand the opponent a forced win.
     return this.quiet(pos);
+  }
+
+  // Greedy and lookahead, as before the threat layer was added.
+  classic(pos, stones) {
+    if (stones === 1) return [this.topCells(pos, 0, 1)[0]];
+    const mine = this.findBestMoves(pos, 0, this.p.evalPos);
+    if (this.level < 2 || mine.length === 1) return mine[0].move;
+    let best = null, bestVal = Infinity;
+    for (const { move: [a, b] } of mine) {
+      pos.put(a, 0); pos.put(b, 0);
+      const won = findWin(pos.b[0]);
+      const replies = won ? [] : this.findBestMoves(pos, 1, 1);
+      pos.take(a, 0); pos.take(b, 0);
+      if (won) return [a, b];
+      const oppBest = replies.length ? replies[0].score : -Infinity;
+      if (oppBest < bestVal) { bestVal = oppBest; best = [a, b]; }
+    }
+    return best;
   }
 
   // Only one stone left to place (the board is nearly full).
@@ -190,8 +205,8 @@ class E6Bot {
   }
 
   quiet(pos) {
-    const moves = this.findBestMoves(pos, 0, this.depth >= 2 ? 10 : this.p.evalPos);
-    if (this.depth >= 2) {
+    const moves = this.findBestMoves(pos, 0, 10);
+    {
       // 2-ply: order my moves by the opponent's best answer.
       for (const m of moves) {
         pos.put(m.move[0], 0); pos.put(m.move[1], 0);
@@ -208,23 +223,33 @@ class E6Bot {
     return defend || moves[0].move;
   }
 
-  // First move in `moves` after which the opponent has no forced win.
-  // Returns moves[0] (or null if orNull) when none is safe. When time runs
-  // out, the next unchecked move is taken.
+  // Best move in `moves` (they come best first) after which the opponent has
+  // no forced win. Checks every move one turn deep first, then the survivors
+  // deeper, so running out of time still leaves a move checked as deep as
+  // there was time for. Returns moves[0] (or null if orNull) when none
+  // survives even the shallowest check.
   pickSafe(pos, moves, orNull = false) {
-    for (const m of moves) {
-      if (performance.now() > this.deadline) return m;
-      if (this.isSafe(pos, m)) return m;
+    let alive = moves;
+    for (let d = 1; d <= this.lv.safeDepth; d++) {
+      const last = d === this.lv.safeDepth, next = [];
+      for (const m of alive) {
+        this.timedOut = false;
+        const safe = this.isSafe(pos, m, d);
+        if (this.timedOut) return next[0] || alive[0];
+        if (safe) { next.push(m); if (last) break; }
+      }
+      if (!next.length) return d === 1 ? (orNull ? null : moves[0]) : alive[0];
+      alive = next;
     }
-    return orNull ? null : moves[0];
+    return alive[0];
   }
 
   // After my move [a, b], can the opponent not force a win?
-  isSafe(pos, [a, b]) {
+  isSafe(pos, [a, b], depth = this.lv.safeDepth) {
     pos.put(a, 0); pos.put(b, 0);
     const info = pos.cover(pos.threatsAt(0, [a, b]));
     let safe;
-    if (info.need === 0) safe = !this.vcf(pos, 1, this.lv.safeDepth);
+    if (info.need === 0) safe = !this.vcf(pos, 1, depth);
     else if (info.need >= 3) safe = true; // I win next turn
     else {
       // The opponent has to block, but blocking stones can make threats of
@@ -257,11 +282,8 @@ class E6Bot {
       for (let j = i + 1; j < cells.length; j++) moves.push([cells[i], cells[j]]);
     const ranked = this.rank(pos, moves);
     this.deadline += this.lv.budgetMs; // worth some extra time: the game is at stake
-    for (const m of ranked) {
-      if (performance.now() > this.deadline) break;
-      if (this.isSafe(pos, m)) return m;
-    }
-    return null;
+    const m = this.pickSafe(pos, ranked, true);
+    return m;
   }
 
   // Sort moves by the board score they lead to.
@@ -282,7 +304,7 @@ class E6Bot {
     const q = 1 - p;
     const cands = this.vcfCands(pos, p);
     for (let i = 0; i < cands.length; i++) {
-      if (performance.now() > this.deadline) return null;
+      if (performance.now() > this.deadline) { this.timedOut = true; return null; }
       const a = cands[i];
       pos.put(a, p);
       for (let j = i + 1; j < cands.length; j++) {
