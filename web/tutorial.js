@@ -31,6 +31,8 @@ const TUTORIAL_STEPS = [
     text: () => `Now <b class="c1">Orange</b> answers. From here on, every turn is <b>two stones</b>.`,
     enter: () => Tutorial.script([at(8, 10), at(10, 8)]),
     done: () => g.history.length >= 2,
+    next: "Next",
+    wait: true, // Next is enabled once Orange has played; no auto-advance
   },
   {
     text: () => `Your turn – now you place <b>two stones</b>. Put them on the marked spots; your turn ends as soon as the second one is down.`,
@@ -41,6 +43,8 @@ const TUTORIAL_STEPS = [
     text: () => `<b class="c1">Orange</b> places two more stones.`,
     enter: () => Tutorial.script([at(10, 10), at(8, 12)]),
     done: () => g.history.length >= 4,
+    next: "Next",
+    wait: true, // Next is enabled once Orange has played; no auto-advance
   },
   {
     text: () => `You have <b>three in a row</b>. ${verb()} the marked spot for your first stone of this turn.`,
@@ -62,6 +66,8 @@ const TUTORIAL_STEPS = [
     text: () => `Five in a row! <b class="c1">Orange</b> has to block…`,
     enter: () => Tutorial.script([at(9, 14), at(9, 7)]),
     done: () => g.history.length >= 6,
+    next: "Next",
+    wait: true, // Next is enabled once Orange has played; no auto-advance
   },
   {
     text: () => `Orange blocked both ends, but there is still room for exactly six. Place the winning stone.`,
@@ -136,6 +142,7 @@ const Tutorial = {
     const nextBtn = document.getElementById("tut-next");
     nextBtn.hidden = !s.next;
     nextBtn.textContent = s.next || "";
+    nextBtn.disabled = !!s.wait;
     document.getElementById("tut-progress").textContent = `Step ${i + 1} of ${this.steps.length}`;
     if (s.enter) s.enter();
     this.update();
@@ -147,7 +154,10 @@ const Tutorial = {
   update() {
     if (!this.active || this.advancing) return;
     const s = this.step;
-    if (s.done && s.done()) {
+    if (s.wait) {
+      const btn = document.getElementById("tut-next");
+      if (btn.disabled && s.done()) { btn.disabled = false; btn.focus({ preventScroll: true }); }
+    } else if (s.done && s.done()) {
       this.advancing = true;
       const tok = this.token;
       setTimeout(() => {
