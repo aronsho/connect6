@@ -8,7 +8,7 @@ import time         # for measuting time performance
 # bot to play cleverly
 class E6:
     """class decides which move the bot makes"""
-    def __init__(self, which_player, bs, c6, grphx):
+    def __init__(self, which_player, bs, c6):
         self.which_player = which_player # lets instance know which player it is ('PLayer1' or 'Player2')
         self.c6 = c6  # instance of connect6 class of the main program, includes various useful functions
         self.bs = bs  # board size
@@ -23,9 +23,7 @@ class E6:
         self.me_pri_2 = np.array([2, 1, 6, 0, 1000]).reshape(5,1,1)
         self.op_pri_2 = np.array([1, 4, 6, 100, 100]).reshape(5,1,1)
         self.me_pos = [0, 4/5, 5/4, 15/3, 15/2, 10000]
-        self.op_pos = [1/6, 1, 10/4, 1000, 1000, 1000]        
-        # only for debugging
-        self.grphx = grphx
+        self.op_pos = [1/6, 1, 10/4, 1000, 1000, 1000]
 
     def getmove(self, board_me, board_op, turn, timeleft): 
         """ returns calculated move"""
@@ -56,10 +54,7 @@ class E6:
                 board_me_root = null_el + board_me_all[root_num, :, :]
                 board_op_root = null_el + board_op_all[root_num, :, :]
                 # me or op?
-                #print('ii, jj', ii, jj)
                 if ii % 2==0:
-                    #print('if, ii, jj', ii, jj)
-                    bestmoves, scores = self.find_best_mvs(self.board_me, self.board_op)
                     bestmoves, scores = self.find_best_mvs(board_me_all[root_num, :, :], board_op_all[root_num, :, :])
                     pp = 0
                     for move in bestmoves:
@@ -70,22 +65,10 @@ class E6:
                             scores_moves[branch_num]=(scores[pp], scores_moves[branch_num][1])
                         board_me_all[branch_num, :, :] = null_el + board_me_root
                         board_op_all[branch_num, :, :] = null_el + board_op_root
-                        #self.grphx.draw_board(board_me_all[branch_num, :, :], board_op_all[branch_num, :, :])
-                        #self.grphx.get_input()
-                        #print('===========================')
-                        #print('critical check start')
-                        #print(board_me_all[branch_num, :, :])
                         board_me_all[branch_num, :, :][move[0]] = 1
                         board_me_all[branch_num, :, :][move[1]] = 1
-                        #print(board_me_all[branch_num, :, :])
-                        #print('critical check end')
-                        #print('===========================')
-                        #print('my turn, root, branch:',root_num, branch_num)
-                        #self.grphx.draw_board(board_me_all[branch_num, :, :], board_op_all[branch_num, :, :])
-                        #self.grphx.get_input()
                         pp += 1
                 else:
-                    #print('else, ii, jj', ii, jj)
                     bestmoves, scores = self.find_best_mvs(board_op_all[root_num, :, :], board_me_all[root_num, :, :])
                     pp = 0
                     for move in bestmoves:
@@ -93,23 +76,11 @@ class E6:
                         scores_moves[branch_num]=(scores[pp], scores_moves[branch_num][1])
                         board_me_all[branch_num, :, :] = null_el + board_me_root
                         board_op_all[branch_num, :, :] = null_el + board_op_root
-                        #self.grphx.draw_board(board_me_all[branch_num, :, :], board_op_all[branch_num, :, :])
-                        #self.grphx.get_input()
-                        #print('===========================')
-                        #print('critical check start')
-                        #print(board_op_all[branch_num, :, :])
                         board_op_all[branch_num, :, :][move[0]] = 1
                         board_op_all[branch_num, :, :][move[1]] = 1
-                        #print(board_op_all[branch_num, :, :])
-                        #print('critical check end')
-                        #print('===========================')
-                        #print('opponent turn, root, branch:',root_num, branch_num)
-                        #self.grphx.draw_board(board_me_all[branch_num, :, :], board_op_all[branch_num, :, :])
-                        #self.grphx.get_input()
                         pp += 1
         # evaluate tree
         pp = 0
-        #print(scores_moves)
         while len(scores_moves)>1:
             for ii in range(int(len(scores_moves)/self.eval_pos)):
                 pos_1 = ii*self.eval_pos
@@ -127,7 +98,6 @@ class E6:
                             scores_moves[ii] = (scores_moves[pos_2][0], scores_moves[ii][1])
             del scores_moves[int(len(scores_moves)/self.eval_pos):]
             pp += 1
-        #print(scores_moves)
         return scores_moves[0][1]
 
     def find_best_mvs(self, board_me, board_op):
@@ -200,8 +170,6 @@ class E6:
         B *= board_free
         return B
 
-        return bestmoves
-
     def aposteriori(self, board_me, board_op, moves):
         """evaluate board after making two moves"""
         # only unique moves
@@ -239,7 +207,7 @@ class E6:
 # bot to play random moves
 class PlayRand:
     """class decides which move the bot makes"""
-    def __init__(self, which_player, bs, c6, grpxh):
+    def __init__(self, which_player, bs, c6):
         self.which_player=which_player # lets instance know which player it is ('PLayer1' or 'Player2')
         self.bs=bs
         self.c6=c6

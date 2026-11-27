@@ -208,21 +208,16 @@ class E6Bot {
 
   quiet(pos) {
     const moves = this.findBestMoves(pos, 0, this.lv.keep, this.lv.width);
-    {
-      // 2-ply: order my moves by the opponent's best answer.
-      for (const m of moves) {
-        pos.put(m.move[0], 0); pos.put(m.move[1], 0);
-        const replies = this.findBestMoves(pos, 1, 1);
-        m.score = replies.length ? -replies[0].score : m.score;
-        pos.take(m.move[0], 0); pos.take(m.move[1], 0);
-      }
-      moves.sort((x, y) => (y.score - x.score) || (x.tie - y.tie));
+    // 2-ply: order my moves by the opponent's best answer.
+    for (const m of moves) {
+      pos.put(m.move[0], 0); pos.put(m.move[1], 0);
+      const replies = this.findBestMoves(pos, 1, 1);
+      if (replies.length) m.score = -replies[0].score;
+      pos.take(m.move[0], 0); pos.take(m.move[1], 0);
     }
-    const choice = this.pickSafe(pos, moves.map(m => m.move), true);
-    if (choice) return choice;
-    // Every top move loses to a forced win: try to break up the opponent's attack.
-    const defend = this.breakAttack(pos);
-    return defend || moves[0].move;
+    moves.sort((x, y) => (y.score - x.score) || (x.tie - y.tie));
+    // If every top move loses to a forced win, try to break up the opponent's attack.
+    return this.pickSafe(pos, moves.map(m => m.move), true) || this.breakAttack(pos) || moves[0].move;
   }
 
   // Best move in `moves` (they come best first) after which the opponent has
@@ -284,8 +279,7 @@ class E6Bot {
       for (let j = i + 1; j < cells.length; j++) moves.push([cells[i], cells[j]]);
     const ranked = this.rank(pos, moves);
     this.deadline = this.t0 + this.lv.budgetMs;
-    const m = this.pickSafe(pos, ranked, true);
-    return m;
+    return this.pickSafe(pos, ranked, true);
   }
 
   // Sort moves by the board score they lead to.

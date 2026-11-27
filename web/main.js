@@ -303,7 +303,6 @@ function updateOnlineUI() {
     declined: "Your friend declined the new game.",
   }[offer] || "";
   resignBtn.hidden = !(on && Online.connected);
-  undoBtn.hidden = on;
   document.getElementById("tutorial-btn").hidden = on || Tutorial.active;
   if (g) render();
 }

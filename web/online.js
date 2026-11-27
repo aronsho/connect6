@@ -24,7 +24,7 @@ const Online = {
   conn: null,
   onStatus: () => {},   // set by main.js
   onMessage: () => {},  // set by main.js
-  onStart: () => {},    // set by main.js: (myColor, state|null) => void
+  onStart: () => {},    // set by main.js: (myColor, state|null, score?) => void
 
   shareLink() {
     return `${location.origin}${location.pathname}?join=${this.code}`;

@@ -6,10 +6,9 @@
 - Now, the plan is to apply machine learning techniques insted of the deterministic one
 
 ## Structure
-- spiel.py is the main script
-- game_class.py contains all the game specific classes
-- bot_class.py contains the class for the moves of the bot
-- gameX (X is a number) are files which contain information about a single game
+- `playgame.py` is the main script (pygame GUI, game flow and rules)
+- `Bot.py` contains the bot classes (`E6`, `PlayRand`)
+- Games are saved as pickles under the name entered on the home screen (default `game1`)
 
 ## Play in the browser
 - `web/` contains a browser version of the game (plain HTML/JS, no build step):

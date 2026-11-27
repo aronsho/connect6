@@ -2,8 +2,6 @@
 ### import---------------------------------------------------------------------
 import numpy as np  # math
 import pickle       # saving and loading
-import random       # random numbers
-import contextlib
 import pygame as pg # graphics without pygame output
 import sys  # system for exiting the game
 
@@ -180,7 +178,7 @@ class Bot:
     """class decides which move the bot makes"""
     def __init__(self, which_player, c6, grphx):
         self.which_player=which_player # lets instance know which player it is ('PLayer1' or 'Player2')
-        self.ext_bot=bot_dic[which_player][0](which_player, bs, c6, grphx)
+        self.ext_bot=bot_dic[which_player][0](which_player, bs, c6)
 
     def getmove(self, board_me, board_opponent, turn, timeleft):
         """communicate to external bot"""
@@ -284,7 +282,6 @@ class Connect6:
 
     def is_valid_location(self, move, board_me, board_opponent):
         """checks if the input was a valid location"""
-        board=board_me+board_opponent
         if move[0] <= bs-1 and move[1] <= bs-1 and move[0]>=0 and move[1]>=0:
             if board_me[move]==0 and board_opponent[move]==0:
                 return True
@@ -307,7 +304,6 @@ class GameGraphics:
         # initialize screen
         self.size=(self.windowsize,self.windowsize+50)
         pg.init()
-        pg.display.set_mode(self.size)
         self.screen=pg.display.set_mode(self.size)
 
     def draw_board(self, board_p1, board_p2, move=None, which_player=None):
@@ -472,8 +468,6 @@ class HomeGraphics:
             pg.draw.rect(self.screen, color, self.input_box, 2)
             # update display
             pg.display.update()
-        
-        #self.name_to_player_class()
         return self.var_dic
     
     def home_screen(self):
