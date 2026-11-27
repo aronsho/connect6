@@ -10,12 +10,15 @@
 // 4 or 5 of one player's stones and none of the other's: it can be completed
 // in a single turn. Every turn it
 //   1. wins if it can,
-//   2. otherwise blocks all of the opponent's threats (if possible),
-//   3. otherwise looks for a forced win: a sequence of moves that each leave
-//      the opponent two threats (both stones are needed to block), ending in
-//      three threats, which cannot be blocked ("threat-space search"),
+//   2. otherwise looks for the shortest forced win: a sequence of moves that
+//      each leave the opponent threats to block – mostly two (both stones are
+//      needed), at most one with a single threat – ending in three threats,
+//      which cannot be blocked ("threat-space search"). Positions already
+//      searched are remembered, so the search goes deeper in the same time,
+//   3. otherwise blocks all of the opponent's threats (if possible),
 //   4. otherwise plays the lookahead move, but skips moves that let the
-//      opponent start such a forced win.
+//      opponent start such a forced win (checked cheapest-first, up to the
+//      time limit of 1 s per move).
 "use strict";
 
 const E6_PARAMS = {
@@ -31,13 +34,26 @@ const E6_PARAMS = {
 
 // Killer's search settings.
 //   winDepth:  how many of my turns a forced win may take
-//   safeDepth: how deep to look for the opponent's forced win before playing
+//   safeChecks: before playing a move, checks that the opponent has no forced
+//              win after it, as [turns, single-threat moves allowed] – from
+//              cheap to thorough; the time limit decides how far it gets
+//   singles:   how many single-threat moves my own forced wins may contain
+//   freeCells: cells tried for the defender's free stone after a single threat
 //   budgetMs:  time limit per move (the bot always moves in time)
 //   keep:      how many of my best moves to consider (2-ply and safety check)
 //   width:     candidate cells per stone when building those moves
-const E6_KILLER = { winDepth: 5, safeDepth: 5, budgetMs: 1000, keep: 40, width: 25 };
+const E6_KILLER = { winDepth: 5, budgetMs: 1000, keep: 40, width: 25,
+  safeChecks: [[1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [3, 1], [4, 1]],
+  singles: 1, freeCells: 6 };
 
 const NSLOT = ALL_SLOTS.length;
+// Random numbers per (player, cell) for hashing positions (Zobrist hashing),
+// so the threat search can remember positions it has already searched.
+const ZOBRIST = (() => {
+  let x = 0x9e3779b9;
+  const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return x >>> 0; };
+  return [0, 1].map(() => [Uint32Array.from({ length: N }, rnd), Uint32Array.from({ length: N }, rnd)]);
+})();
 const CELL_SLOTS = (() => {
   const lists = Array.from({ length: N }, () => []);
   ALL_SLOTS.forEach((slot, s) => { for (const c of slot) lists[c].push(s); });
@@ -58,15 +74,22 @@ class Pos {
     }
     this.mark = new Int32Array(NSLOT);
     this.stamp = 0;
+    this.h1 = 0; this.h2 = 0;
+    for (let c = 0; c < N; c++) for (const p of [0, 1]) if (this.b[p][c]) this.hash(c, p);
   }
+  hash(c, p) { this.h1 ^= ZOBRIST[p][0][c]; this.h2 ^= ZOBRIST[p][1][c]; }
+  // 53-bit key of the position (a JS number, so it can key a Map).
+  key() { return (this.h1 >>> 0) * 2097152 + (this.h2 & 0x1fffff); }
   empty(c) { return !this.b[0][c] && !this.b[1][c]; }
   put(c, p) {
     this.b[p][c] = 1;
+    this.hash(c, p);
     const ss = CELL_SLOTS[c], cn = this.cnt[p];
     for (let i = 0; i < ss.length; i++) cn[ss[i]]++;
   }
   take(c, p) {
     this.b[p][c] = 0;
+    this.hash(c, p);
     const ss = CELL_SLOTS[c], cn = this.cnt[p];
     for (let i = 0; i < ss.length; i++) cn[ss[i]]--;
   }
@@ -141,6 +164,7 @@ class E6Bot {
     if (this.level < 3) return this.classic(pos, stones);
     const t0 = this.t0 = performance.now();
     this.deadline = t0 + this.lv.budgetMs;
+    this.tt = [new Map(), new Map()]; // threat-search results per attacker
     if (stones === 1) return [this.singleStone(pos)];
 
     // 1. Win now.
@@ -150,15 +174,17 @@ class E6Bot {
       return cells;
     }
 
-    // 2. Block the opponent's threats.
-    const opThreats = pos.threats(1);
-    if (opThreats.length) return this.block(pos, opThreats);
-
-    // 3. Forced win (with part of the time; the rest is for defence).
+    // 2. Forced win, the shortest one found (with part of the time; the rest
+    //    is for defence). Works when I have to block too: the search then
+    //    only tries moves that block while attacking.
     this.deadline = t0 + 0.3 * this.lv.budgetMs;
-    const win = this.vcf(pos, 0, this.lv.winDepth);
+    const win = this.forcedWin(pos, 0, this.lv.winDepth, this.lv.singles);
     if (win) return win;
     this.deadline = t0 + 0.7 * this.lv.budgetMs; // the rest is for breakAttack
+
+    // 3. Block the opponent's threats.
+    const opThreats = pos.threats(1);
+    if (opThreats.length) { this.deadline = t0 + this.lv.budgetMs; return this.block(pos, opThreats); }
 
     // 4. Positional move that doesn't hand the opponent a forced win.
     return this.quiet(pos);
@@ -232,43 +258,26 @@ class E6Bot {
   // survives even the shallowest check.
   pickSafe(pos, moves, orNull = false) {
     let alive = moves;
-    for (let d = 1; d <= this.lv.safeDepth; d++) {
-      const last = d === this.lv.safeDepth, next = [];
+    const checks = this.lv.safeChecks;
+    for (let i = 0; i < checks.length; i++) {
+      const [d, singles] = checks[i], last = i === checks.length - 1, next = [];
       for (const m of alive) {
         this.timedOut = false;
-        const safe = this.isSafe(pos, m, d);
+        const safe = this.isSafe(pos, m, d, singles);
         if (this.timedOut) return next[0] || alive[0];
         if (safe) { next.push(m); if (last) break; }
       }
-      if (!next.length) return d === 1 ? (orNull ? null : moves[0]) : alive[0];
+      if (!next.length) return i === 0 ? (orNull ? null : moves[0]) : alive[0];
       alive = next;
     }
     return alive[0];
   }
 
-  // After my move [a, b], can the opponent not force a win?
-  isSafe(pos, [a, b], depth = this.lv.safeDepth) {
+  // After my move [a, b], can the opponent not force a win? If my move makes
+  // threats, the search only lets them use moves that block those.
+  isSafe(pos, [a, b], depth, singles) {
     pos.put(a, 0); pos.put(b, 0);
-    const info = pos.cover(pos.threatsAt(0, [a, b]));
-    let safe;
-    if (info.need === 0) safe = !this.vcf(pos, 1, depth);
-    else if (info.need >= 3) safe = true; // I win next turn
-    else {
-      // The opponent has to block, but blocking stones can make threats of
-      // their own. Unsafe if some block leaves me with three threats to stop.
-      const blocks = info.need === 2 ? info.pairs : [];
-      if (info.need === 1) {
-        const free = this.vcfCands(pos, 1);
-        for (const x of info.singles) for (const y of free) if (y !== x) blocks.push([x, y]);
-      }
-      safe = true;
-      for (const [x, y] of blocks) {
-        pos.put(x, 1); pos.put(y, 1);
-        const lost = pos.cover(pos.threats(1)).need >= 3;
-        pos.take(x, 1); pos.take(y, 1);
-        if (lost) { safe = false; break; }
-      }
-    }
+    const safe = pos.cover(pos.threatsAt(0, [a, b])).need >= 3 || !this.vcf(pos, 1, depth, singles);
     pos.take(a, 0); pos.take(b, 0);
     return safe;
   }
@@ -298,41 +307,100 @@ class E6Bot {
     }).sort((x, y) => (y.score - x.score) || (x.tie - y.tie)).map(x => x.m);
   }
 
-  // Threat-space search: can player p force a win within `depth` turns using
-  // only moves that leave the other side two threats (forcing both stones),
-  // ending with three? Assumes neither side has threats on the board now.
-  // Returns p's first move, or null.
-  vcf(pos, p, depth) {
-    const q = 1 - p;
-    const cands = this.vcfCands(pos, p);
-    for (let i = 0; i < cands.length; i++) {
-      if (performance.now() > this.deadline) { this.timedOut = true; return null; }
-      const a = cands[i];
-      pos.put(a, p);
-      for (let j = i + 1; j < cands.length; j++) {
-        const b = cands[j];
-        pos.put(b, p);
-        const wins = pos.threatsAt(p, [a, b]);
-        let found = false;
-        if (wins.length >= 2) {
-          const info = pos.cover(wins);
-          if (info.need >= 3) found = true;
-          else if (info.need === 2 && depth > 1) {
-            found = true;
-            for (const [x, y] of info.pairs) {
-              pos.put(x, q); pos.put(y, q);
-              const ok = pos.threatsAt(q, [x, y]).length === 0 && this.vcf(pos, p, depth - 1) !== null;
-              pos.take(x, q); pos.take(y, q);
-              if (!ok) { found = false; break; }
-            }
-          }
-        }
-        pos.take(b, p);
-        if (found) { pos.take(a, p); return [a, b]; }
-      }
-      pos.take(a, p);
+  // Shortest forced win for p within maxDepth turns (iterative deepening).
+  forcedWin(pos, p, maxDepth, singles) {
+    this.timedOut = false;
+    for (let d = 1; d <= maxDepth; d++) {
+      const m = this.vcf(pos, p, d, singles);
+      if (m || this.timedOut) return m;
     }
     return null;
+  }
+
+  // Threat-space search: can player p, to move, force a win within `depth`
+  // turns? Every move of p's must leave the other side (q) threats to block:
+  //  - two threats: both of q's stones are needed, so all q's blocks are tried;
+  //  - one threat (at most `singles` times): q blocks with one stone and has a
+  //    free one, which is tried on the few cells that matter most (q's own
+  //    attacking spots and p's) – a good guess, not a proof;
+  //  - three threats can't all be blocked: p wins.
+  // If q has threats on the board, p's move must block them too, and q's
+  // blocks may make new threats that p then has to block. Returns p's first
+  // move, or null. Results are cached per position in this.tt.
+  vcf(pos, p, depth, singles = 0) {
+    const q = 1 - p, key = pos.key(), tt = this.tt[p];
+    const known = tt.get(key);
+    if (known !== undefined) {
+      if (known.win && known.depth <= depth && known.singles <= singles) return known.win;
+      if (known.fail >= depth && known.singles >= singles) return null;
+    }
+    if (performance.now() > this.deadline) { this.timedOut = true; return null; }
+
+    // Moves to try: if q has threats, only moves that block all of them.
+    const block = pos.cover(pos.threats(q));
+    if (block.need >= 3) { tt.set(key, { fail: Infinity, singles: Infinity }); return null; }
+    const cands = this.vcfCands(pos, p);
+    let moves;
+    if (block.need === 0) {
+      moves = [];
+      for (let i = 0; i < cands.length; i++)
+        for (let j = i + 1; j < cands.length; j++) moves.push(cands[i], cands[j]);
+    } else if (block.need === 1) {
+      moves = [];
+      for (const a of block.singles) for (const b of cands) if (b !== a) moves.push(a, b);
+    } else {
+      moves = block.pairs.flat();
+    }
+
+    const result = win => {
+      if (win) tt.set(key, { win, depth, singles });
+      else if (!this.timedOut) tt.set(key, { fail: depth, singles });
+      return win;
+    };
+    const oneThreat = []; // single-threat moves, tried after the double threats
+    for (let k = 0; k < moves.length; k += 2) {
+      if ((k & 255) === 0 && performance.now() > this.deadline) { this.timedOut = true; return null; }
+      const a = moves[k], b = moves[k + 1];
+      pos.put(a, p); pos.put(b, p);
+      const wins = pos.threatsAt(p, [a, b]);
+      let found = false;
+      if (wins.length >= 2) {
+        const info = pos.cover(wins);
+        if (info.need >= 3) found = true;
+        else if (info.need === 2 && depth > 1) found = this.allBlocksLose(pos, p, info.pairs, depth, singles);
+        else if (info.need === 1 && singles > 0 && depth > 1) oneThreat.push(a, b);
+      } else if (wins.length === 1 && singles > 0 && depth > 1) oneThreat.push(a, b);
+      pos.take(a, p); pos.take(b, p);
+      if (this.timedOut) return null;
+      if (found) return result([a, b]);
+    }
+    for (let k = 0; k < oneThreat.length; k += 2) {
+      const a = oneThreat[k], b = oneThreat[k + 1];
+      pos.put(a, p); pos.put(b, p);
+      const info = pos.cover(pos.threatsAt(p, [a, b]));
+      // q's replies: a blocking stone plus a free stone on a cell that matters
+      const free = [...new Set([...this.vcfCands(pos, q).slice(0, this.lv.freeCells),
+                                ...this.vcfCands(pos, p).slice(0, this.lv.freeCells)])];
+      const replies = [];
+      for (const x of info.singles) for (const y of free) if (y !== x) replies.push([x, y]);
+      const found = this.allBlocksLose(pos, p, replies, depth, singles - 1);
+      pos.take(a, p); pos.take(b, p);
+      if (this.timedOut) return null;
+      if (found) return result([a, b]);
+    }
+    return result(null);
+  }
+
+  // Does p (who just moved) still force a win against each of q's replies?
+  allBlocksLose(pos, p, replies, depth, singles) {
+    const q = 1 - p;
+    for (const [x, y] of replies) {
+      pos.put(x, q); pos.put(y, q);
+      const ok = this.vcf(pos, p, depth - 1, singles) !== null;
+      pos.take(x, q); pos.take(y, q);
+      if (!ok) return false;
+    }
+    return true;
   }
 
   // Empty cells in slots where p has 2+ stones and the other side none – the
