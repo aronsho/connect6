@@ -5,8 +5,6 @@
 //                         do: for each of my 6 best moves, assume the opponent's
 //                         best reply, and pick the move that leaves them worst off.
 // level 3 ("killer")    – lookahead plus a threat-based tactical layer.
-// level 4 ("god")       – killer, but cautious: more time, deeper safety checks,
-//                         and only attacks that hold up (see E6_GOD).
 //
 // Killer understands Connect6 threats. A "threat" is a run of 6 cells holding
 // 4 or 5 of one player's stones and none of the other's: it can be completed
@@ -46,14 +44,7 @@ const E6_PARAMS = {
 //   width:     candidate cells per stone when building those moves
 const E6_KILLER = { winDepth: 5, budgetMs: 1000, keep: 40, width: 25,
   safeChecks: [[1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [3, 1], [4, 1]],
-  singles: 1, freeCells: 6, verify: false };
-
-// God: Killer, but cautious. Attacks that contain a single threat are only
-// guesses (the defender's free stone isn't tried everywhere), so God plays
-// one only if it also passes all the safety checks (verify); safety checks
-// go deeper; and there is more time to think.
-const E6_GOD = { ...E6_KILLER, budgetMs: 2500, verify: true,
-  safeChecks: [[1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [2, 1], [3, 1], [4, 1], [5, 1], [3, 2]] };
+  singles: 1, freeCells: 6 };
 
 const NSLOT = ALL_SLOTS.length;
 // Random numbers per (player, cell) for hashing positions (Zobrist hashing),
@@ -159,7 +150,7 @@ class E6Bot {
   constructor(level = 1, params = E6_PARAMS) {
     this.level = level;
     this.p = params;
-    this.lv = level >= 4 ? E6_GOD : E6_KILLER;
+    this.lv = E6_KILLER;
   }
 
   // me, op: Uint8Array(N) of my / opponent's stones. stones: 1 or 2.
@@ -187,14 +178,8 @@ class E6Bot {
     //    is for defence). Works when I have to block too: the search then
     //    only tries moves that block while attacking.
     this.deadline = t0 + 0.3 * this.lv.budgetMs;
-    const win = this.forcedWin(pos, 0, this.lv.winDepth, this.lv.verify ? 0 : this.lv.singles);
+    const win = this.forcedWin(pos, 0, this.lv.winDepth, this.lv.singles);
     if (win) return win;
-    if (this.lv.verify && this.lv.singles) {
-      // A win with single threats is a guess: play it only if it holds up.
-      const guess = this.forcedWin(pos, 0, this.lv.winDepth, this.lv.singles);
-      this.deadline = t0 + 0.45 * this.lv.budgetMs;
-      if (guess && this.safeAll(pos, guess)) return guess;
-    }
     this.deadline = t0 + 0.7 * this.lv.budgetMs; // the rest is for breakAttack
 
     // 3. Block the opponent's threats.
@@ -288,15 +273,6 @@ class E6Bot {
     return alive[0];
   }
 
-  // Does `move` pass every safety check (in time)?
-  safeAll(pos, move) {
-    for (const [d, singles] of this.lv.safeChecks) {
-      this.timedOut = false;
-      if (!this.isSafe(pos, move, d, singles) || this.timedOut) return false;
-    }
-    return true;
-  }
-
   // After my move [a, b], can the opponent not force a win? If my move makes
   // threats, the search only lets them use moves that block those.
   isSafe(pos, [a, b], depth, singles) {
@@ -364,9 +340,17 @@ class E6Bot {
     const block = pos.cover(pos.threats(q));
     if (block.need >= 3) { tt.set(key, { fail: Infinity, singles: Infinity }); return null; }
     const cands = this.vcfCands(pos, p);
-    const moves = block.need === 0 ? this.threatMoves(pos, p, cands, cands)
-      : block.need === 1 ? this.threatMoves(pos, p, block.singles, cands)
-      : block.pairs.flat();
+    let moves;
+    if (block.need === 0) {
+      moves = [];
+      for (let i = 0; i < cands.length; i++)
+        for (let j = i + 1; j < cands.length; j++) moves.push(cands[i], cands[j]);
+    } else if (block.need === 1) {
+      moves = [];
+      for (const a of block.singles) for (const b of cands) if (b !== a) moves.push(a, b);
+    } else {
+      moves = block.pairs.flat();
+    }
 
     const result = win => {
       if (win) tt.set(key, { win, depth, singles });
@@ -374,45 +358,22 @@ class E6Bot {
       return win;
     };
     const oneThreat = []; // single-threat moves, tried after the double threats
-    // Moves come grouped by their first stone a: place a once, then count each
-    // b's threats from the slot counts, and only place b if that's promising.
-    const cp = pos.cnt[p], co = pos.cnt[q], wantSingles = singles > 0 && depth > 1;
-    let curA = -1, aThreats = [];
     for (let k = 0; k < moves.length; k += 2) {
+      if ((k & 255) === 0 && performance.now() > this.deadline) { this.timedOut = true; return null; }
       const a = moves[k], b = moves[k + 1];
-      if (a !== curA) {
-        if (curA >= 0) pos.take(curA, p);
-        if (performance.now() > this.deadline) { this.timedOut = true; return null; }
-        curA = a;
-        pos.put(a, p);
-        aThreats = [];
-        for (const s of CELL_SLOTS[a]) if (cp[s] >= 4 && !co[s]) aThreats.push(s);
-      }
-      let n = 0;
-      const st = ++pos.stamp, bs = CELL_SLOTS[b];
-      for (let i = 0; i < bs.length; i++) {
-        const s = bs[i];
-        pos.mark[s] = st;
-        if (!co[s] && cp[s] >= 3) n++;
-      }
-      for (const s of aThreats) if (pos.mark[s] !== st) n++;
-      if (n < 2 && !(n === 1 && wantSingles)) continue;
-      pos.put(b, p);
+      pos.put(a, p); pos.put(b, p);
       const wins = pos.threatsAt(p, [a, b]);
       let found = false;
       if (wins.length >= 2) {
         const info = pos.cover(wins);
         if (info.need >= 3) found = true;
         else if (info.need === 2 && depth > 1) found = this.allBlocksLose(pos, p, info.pairs, depth, singles);
-        else if (info.need === 1 && wantSingles) oneThreat.push(a, b);
-      } else if (wins.length === 1 && wantSingles) oneThreat.push(a, b);
-      pos.take(b, p);
-      if (this.timedOut || found) {
-        pos.take(a, p);
-        return this.timedOut ? null : result([a, b]);
-      }
+        else if (info.need === 1 && singles > 0 && depth > 1) oneThreat.push(a, b);
+      } else if (wins.length === 1 && singles > 0 && depth > 1) oneThreat.push(a, b);
+      pos.take(a, p); pos.take(b, p);
+      if (this.timedOut) return null;
+      if (found) return result([a, b]);
     }
-    if (curA >= 0) pos.take(curA, p);
     for (let k = 0; k < oneThreat.length; k += 2) {
       const a = oneThreat[k], b = oneThreat[k + 1];
       pos.put(a, p); pos.put(b, p);
@@ -428,39 +389,6 @@ class E6Bot {
       if (found) return result([a, b]);
     }
     return result(null);
-  }
-
-  // Pairs [a, b] (flat list) with a from `firsts` that can make a threat for p.
-  // A threat is a slot reaching 4 stones. If it contains b, it had 3 stones
-  // once a was placed, so b only needs to be tried on cells of such slots
-  // ("hot" cells). If it only contains a, b is free and is tried on the most
-  // promising cells. This skips the thousands of pairs that make no threat.
-  threatMoves(pos, p, firsts, cands) {
-    const cp = pos.cnt[p], co = pos.cnt[1 - p];
-    const hot0 = new Set();
-    for (let s = 0; s < NSLOT; s++)
-      if (cp[s] === 3 && !co[s]) for (const c of ALL_SLOTS[s]) if (pos.empty(c)) hot0.add(c);
-    const out = [], seen = new Set(), builders = cands.slice(0, 10);
-    for (const a of firsts) {
-      pos.put(a, p);
-      const hot = new Set(hot0);
-      let threats = 0;
-      for (const s of CELL_SLOTS[a]) {
-        if (co[s]) continue;
-        if (cp[s] >= 4) threats++;
-        else if (cp[s] === 3) for (const c of ALL_SLOTS[s]) if (pos.empty(c)) hot.add(c);
-      }
-      pos.take(a, p);
-      if (threats) for (const c of builders) hot.add(c);
-      for (const b of hot) {
-        if (b === a) continue;
-        const k = a < b ? a * N + b : b * N + a;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push(a, b);
-      }
-    }
-    return out;
   }
 
   // Does p (who just moved) still force a win against each of q's replies?

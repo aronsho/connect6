@@ -457,7 +457,7 @@ function render() {
 }
 
 function updateStatus() {
-  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)", bot3: " (bot)", bot4: " (bot)", script: "" };
+  const tag = { human: Online.active ? " (you)" : "", remote: " (friend)", bot1: " (bot)", bot2: " (bot)", bot3: " (bot)", script: "" };
   const who = p => NAMES[p] + tag[g.players[p]];
   let text;
   const again = Tutorial.active ? "" : Online.active ? "Press “New game” to offer a rematch." : "Press “New game” to play again.";

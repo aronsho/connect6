@@ -17,9 +17,7 @@
 - Play locally: open `web/index.html`, or run `python3 -m http.server --directory web` and go to http://localhost:8000
 - Bots: "medium" (greedy) plays like `Bot.py` does today; "expert" (lookahead) is the 2-ply min/max search that `E6.tree()` was meant to do;
   "killer" is expert plus a threat-space search (win if possible, block threats, find forced wins made of double
-  threats and at most one single threat, and avoid moves that let the opponent start one). Its settings are in `E6_KILLER` in `bot.js`.
-  "god" is killer made cautious: up to 2.5 s per move, deeper safety checks, and it only plays an attack with a single
-  threat in it if that attack passes the safety checks too (`E6_GOD`)
+  threats and at most one single threat, and avoid moves that let the opponent start one). Its settings are in `E6_KILLER` in `bot.js`
 - Online play: "Play a friend online" creates a link; whoever opens it joins the game. Browsers connect
   peer-to-peer via WebRTC (`online.js`, PeerJS); the free public PeerJS server only introduces them
 - Hosting: `.github/workflows/pages.yml` publishes `web/` to GitHub Pages on every push to `master`
